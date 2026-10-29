@@ -35,6 +35,17 @@
   --row-bad: #fde3e3;
   --row-mid: #fff1d6;
   --row-good: #e5f3e6;
+  --case-top: #e7e8ea;
+  --case-bottom: #cdd0d4;
+  --case-edge: rgba(0, 0, 0, .1);
+  --key-shadow: rgba(0, 0, 0, .28);
+  --key-neutral: #f6f6f7;
+  --pale: rgba(255, 255, 255, .5);
+  --caps-off: rgba(0, 0, 0, .25);
+  --touch-ring: rgba(0, 0, 0, .35);
+  --flash-ok: #2fbf4a;
+  --flash-bad: #e53935;
+  --flash-warn: #f2c200;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -67,6 +78,17 @@
     --row-bad: #4a2323;
     --row-mid: #43341b;
     --row-good: #1f3a22;
+    --case-top: #36393e;
+    --case-bottom: #2a2c30;
+    --case-edge: rgba(255, 255, 255, .07);
+    --key-shadow: rgba(0, 0, 0, .6);
+    --key-neutral: #46494f;
+    --pale: rgba(23, 25, 28, .5);
+    --caps-off: rgba(255, 255, 255, .25);
+    --touch-ring: rgba(255, 255, 255, .4);
+    --flash-ok: #3ddc5a;
+    --flash-bad: #ff5a52;
+    --flash-warn: #ffd23f;
   }
 }
 * { box-sizing: border-box; }
@@ -127,29 +149,58 @@ textarea { width: 100%; min-height: 90px; background: var(--bg); border: 1px sol
 /* keyboard */
 #kbWrap { margin-top: 10px; container-type: inline-size; }
 #kbWrap.colors .key .m, #kbWrap.colors .key .alt { visibility: hidden; }
+#reportOut { margin-top: 8px; min-height: 220px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+#reportMsg { margin-left: 8px; }
+#reportMsg.ok { color: var(--ok); } #reportMsg.err { color: var(--err); }
 #textBox.nohint #text span.en { text-decoration: none; }
 .quick { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); }
 .quick select { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font-size: 14px; }
-#kb { position: relative; width: 100%; aspect-ratio: 15 / 5; }
-.key {
-  position: absolute; border-radius: 6px; color: var(--key-fg);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 2.5cqw; line-height: 1.05; user-select: none;
+#kbCase {
+  padding: 1.1cqw; border-radius: 1.8cqw;
+  background: linear-gradient(180deg, var(--case-top), var(--case-bottom));
+  box-shadow: inset 0 0 0 1px var(--case-edge);
 }
+#kb { position: relative; width: 100%; aspect-ratio: 15 / 6; }
+.key {
+  position: absolute; border-radius: .8cqw; color: var(--key-fg);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 2.4cqw; line-height: 1.05; user-select: none;
+  box-shadow: 0 .22cqw 0 var(--key-shadow);
+}
+.key.down { transform: translateY(.22cqw); box-shadow: none; filter: brightness(.86); }
+.key.frow::after { content: ''; position: absolute; inset: 0; border-radius: inherit; background: var(--pale); pointer-events: none; }
 .key .m { display: flex; flex-direction: column; align-items: center; }
-.key .m.one { font-size: 2.9cqw; }
+.key .m.one { font-size: 2.8cqw; }
 .key .alt {
   position: absolute; top: .35cqw; right: .55cqw;
-  font-size: 1.45cqw; line-height: 1.05; color: var(--key-alt);
+  font-size: 1.4cqw; line-height: 1.05; color: var(--key-alt);
   display: flex; flex-direction: column; align-items: flex-end;
 }
-.key .lbl { font-size: 1.55cqw; opacity: .8; }
+.key .lbl { position: absolute; font-size: 1.25cqw; line-height: 1; opacity: .85; white-space: nowrap; }
+.lbl.bl { left: .65cqw; bottom: .55cqw; } .lbl.br { right: .65cqw; bottom: .55cqw; }
+.lbl.tl { left: .65cqw; top: .55cqw; } .lbl.tr { right: .65cqw; top: .55cqw; }
+.key .lbl.c { position: static; }
+.key .lbl.ar { position: static; font-size: .95cqw; }
+.capsdot { position: absolute; left: .65cqw; top: .65cqw; width: .55cqw; height: .55cqw; border-radius: 50%; background: var(--caps-off); }
+.key.caps-on .capsdot { background: #3ddc5a; box-shadow: 0 0 .45cqw #3ddc5a; }
+.touchid { width: 3.2cqw; height: 3.2cqw; border-radius: 50%; border: .2cqw solid var(--touch-ring); }
 .key.next { outline: .45cqw solid var(--ring); outline-offset: .15cqw; z-index: 2; }
+.f-none { background: var(--key-neutral); }
 .f-lp { background: var(--f-lp); } .f-lr { background: var(--f-lr); }
 .f-lm { background: var(--f-lm); } .f-li { background: var(--f-li); }
 .f-ri { background: var(--f-ri); } .f-rm { background: var(--f-rm); }
 .f-rr { background: var(--f-rr); } .f-rp { background: var(--f-rp); }
 .f-th { background: var(--f-th); }
+/* short flash after a key press: green ok, red wrong key, yellow layout/Shift */
+.key.fl-ok { --fl: var(--flash-ok); } .key.fl-bad { --fl: var(--flash-bad); } .key.fl-warn { --fl: var(--flash-warn); }
+.key.fl::before {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 1;
+  background: var(--fl); opacity: 0; animation: keyflash 250ms ease-out;
+}
+@keyframes keyflash { from { opacity: .85; } to { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .key.fl::before { animation: none; opacity: 1; background: none; box-shadow: inset 0 0 0 .4cqw var(--fl); }
+}
 #hint { margin-top: 10px; text-align: center; font-size: 16px; min-height: 24px; }
 #hint b { font-size: 19px; padding: 0 4px; }
 
@@ -211,12 +262,16 @@ h2:first-child { margin-top: 0; }
       <div id="result" class="hidden"></div>
     </div>
     <div id="status"><span id="msg"></span><span id="live"></span></div>
-    <div id="kbWrap"><div id="kb"></div></div>
+    <div id="kbWrap"><div id="kbCase"><div id="kb"></div></div></div>
     <div id="hint"></div>
   </section>
 
   <section id="tab-stats" class="hidden">
     <div class="panel">
+      <h2>Отчёт для Claude</h2>
+      <p class="muted small" style="margin:0 0 8px">Короткая сводка простым текстом: вставь её в чат с Claude и попроси советов.</p>
+      <div><button class="primary" id="reportBtn">Отчёт для Claude</button><span id="reportMsg"></span></div>
+      <textarea id="reportOut" class="hidden" readonly></textarea>
       <h2>По символам</h2>
       <div class="row small" style="margin-bottom:8px">
         <label>Раскладка:
@@ -274,7 +329,7 @@ const store = {
     catch (e) { return false; }
   }
 };
-const K_SETTINGS = 'tt.settings', K_STATS = 'tt.stats', K_HIST = 'tt.history', K_CUSTOM = 'tt.custom';
+const K_SETTINGS = 'tt.settings', K_STATS = 'tt.stats', K_HIST = 'tt.history', K_CUSTOM = 'tt.custom', K_TOTALS = 'tt.totals';
 
 /* ---------- layouts ---------- */
 const EN = {
@@ -303,15 +358,15 @@ const MAPS = { RU, EN };
 const OTHER = { RU: 'EN', EN: 'RU' };
 
 const FINGER_KEYS = {
-  lp: 'Backquote Digit1 KeyQ KeyA KeyZ Tab CapsLock ShiftLeft IntlBackslash',
-  lr: 'Digit2 KeyW KeyS KeyX',
-  lm: 'Digit3 KeyE KeyD KeyC',
-  li: 'Digit4 Digit5 KeyR KeyT KeyF KeyG KeyV KeyB',
-  ri: 'Digit6 Digit7 KeyY KeyU KeyH KeyJ KeyN KeyM',
-  rm: 'Digit8 KeyI KeyK Comma',
+  lp: 'Escape Backquote Digit1 KeyQ KeyA KeyZ Tab CapsLock ShiftLeft IntlBackslash Fn ControlLeft AltLeft',
+  lr: 'F1 F2 Digit2 KeyW KeyS KeyX',
+  lm: 'F3 F4 Digit3 KeyE KeyD KeyC',
+  li: 'F5 F6 Digit4 Digit5 KeyR KeyT KeyF KeyG KeyV KeyB',
+  ri: 'F7 F8 F9 Digit6 Digit7 KeyY KeyU KeyH KeyJ KeyN KeyM',
+  rm: 'F10 F11 F12 Digit8 KeyI KeyK Comma',
   rr: 'Digit9 KeyO KeyL Period',
   rp: 'Digit0 Minus Equal KeyP BracketLeft BracketRight Backslash Semicolon Quote Slash Enter Backspace ShiftRight',
-  th: 'Space'
+  th: 'Space MetaLeft MetaRight'
 };
 const FINGER = {};
 Object.keys(FINGER_KEYS).forEach(f => FINGER_KEYS[f].split(' ').forEach(c => { FINGER[c] = f; }));
@@ -320,27 +375,42 @@ const FINGER_NAME = {
   ri: 'правый указательный', rm: 'правый средний', rr: 'правый безымянный', rp: 'правый мизинец', th: 'большой палец'
 };
 
+// MacBook Air M2 (ANSI, US): 15 units wide, 6 rows; the function row is full height
 function geometry(iso) {
+  const fw = (15 - 1.5 - 1) / 12;
   const rows = [
+    [['Escape', 1.5], ...Array.from({ length: 12 }, (_, i) => ['F' + (i + 1), fw]), ['TouchID', 1]],
     [['Backquote', 1], ...'1234567890'.split('').map(d => ['Digit' + d, 1]), ['Minus', 1], ['Equal', 1], ['Backspace', 2]],
     [['Tab', 1.5], ...'QWERTYUIOP'.split('').map(c => ['Key' + c, 1]), ['BracketLeft', 1], ['BracketRight', 1], ['Backslash', 1.5]],
     [['CapsLock', 1.75], ...'ASDFGHJKL'.split('').map(c => ['Key' + c, 1]), ['Semicolon', 1], ['Quote', 1], ['Enter', 2.25]],
     [...(iso ? [['ShiftLeft', 1.25], ['IntlBackslash', 1]] : [['ShiftLeft', 2.25]]),
       ...'ZXCVBNM'.split('').map(c => ['Key' + c, 1]), ['Comma', 1], ['Period', 1], ['Slash', 1], ['ShiftRight', 2.75]],
-    [['Space', 6.25, 3.75]]
+    [['Fn', 1], ['ControlLeft', 1], ['AltLeft', 1], ['MetaLeft', 1.25], ['Space', 5.5], ['MetaRight', 1.25], ['AltRight', 1],
+      ['ArrowLeft', 1], ['ArrowUp', 1, 0.5], ['ArrowRight', 1]]
   ];
   const keys = [];
   rows.forEach((row, y) => {
     let x = 0;
-    row.forEach(([code, w, x0]) => {
-      if (x0 != null) x = x0;
-      keys.push({ code, w, x, y });
+    row.forEach(([code, w, h]) => {
+      keys.push({ code, w, x, y, h: h || 1 });
+      if (code === 'ArrowUp') keys.push({ code: 'ArrowDown', w, x, y: y + 0.5, h: 0.5 });
       x += w;
     });
   });
   return keys;
 }
-const SPECIAL_LABEL = { Backspace: '⌫', Tab: 'tab', CapsLock: 'caps lock', Enter: 'return', ShiftLeft: 'shift', ShiftRight: 'shift', Space: '' };
+const lbl = (t, pos) => `<span class="lbl ${pos}">${t}</span>`;
+const SPECIAL = {
+  Escape: lbl('esc', 'bl'), TouchID: '<span class="touchid"></span>', Backspace: lbl('delete', 'br'), Tab: lbl('tab', 'bl'),
+  CapsLock: '<span class="capsdot"></span>' + lbl('caps lock', 'bl'), Enter: lbl('return', 'br'),
+  ShiftLeft: lbl('shift', 'bl'), ShiftRight: lbl('shift', 'br'), Space: '',
+  Fn: lbl('fn', 'tr') + lbl('🌐', 'bl'), ControlLeft: lbl('⌃', 'tr') + lbl('control', 'bl'),
+  AltLeft: lbl('⌥', 'tr') + lbl('option', 'bl'), MetaLeft: lbl('⌘', 'tr') + lbl('command', 'bl'),
+  MetaRight: lbl('⌘', 'tl') + lbl('command', 'br'), AltRight: lbl('⌥', 'tl') + lbl('option', 'br'),
+  ArrowLeft: lbl('◀', 'ar'), ArrowRight: lbl('▶', 'ar'), ArrowUp: lbl('▲', 'ar'), ArrowDown: lbl('▼', 'ar')
+};
+for (let i = 1; i <= 12; i++) SPECIAL['F' + i] = lbl('F' + i, 'c');
+const MODIFIER_CODES = new Set(['ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight', 'AltLeft', 'AltRight', 'MetaLeft', 'MetaRight', 'CapsLock', 'Fn']);
 
 // char -> {code, shift} for each layout
 const REV = { RU: {}, EN: {} };
@@ -495,7 +565,11 @@ const saveSettings = () => store.set(K_SETTINGS, settings);
 
 let stats = store.get(K_STATS, {});
 let history = store.get(K_HIST, []);
-const saveStats = () => { store.set(K_STATS, stats); store.set(K_HIST, history); };
+// lesson count and time over all time (history keeps only the last 50 lessons)
+const lessonMs = x => x.ms != null ? x.ms : (x.wpm ? x.chars / 5 / x.wpm * 60000 : 0);
+let totals = store.get(K_TOTALS, null) ||
+  { lessons: history.length, ms: Math.round(history.reduce((a, x) => a + lessonMs(x), 0)) };
+const saveStats = () => { store.set(K_STATS, stats); store.set(K_HIST, history); store.set(K_TOTALS, totals); };
 
 function statOf(L, ch) {
   const k = L + '|' + ch;
@@ -761,7 +835,7 @@ function renderLive() {
 /* ---------- keyboard ---------- */
 let kbLayout = null, kbIso = null;
 function keyInner(code, L) {
-  if (code in SPECIAL_LABEL) return `<span class="lbl">${SPECIAL_LABEL[code]}</span>`;
+  if (code in SPECIAL) return SPECIAL[code];
   const m = MAPS[L][code], o = MAPS[OTHER[L]][code];
   const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   let main;
@@ -784,22 +858,73 @@ function buildKeyboard() {
   kb.textContent = '';
   geometry(settings.iso).forEach(k => {
     const el = document.createElement('div');
-    el.className = 'key f-' + FINGER[k.code];
+    el.className = 'key f-' + (FINGER[k.code] || 'none') + (k.y === 0 ? ' frow' : '');
+    if (downCodes.has(k.code)) el.classList.add('down');
     el.dataset.code = k.code;
-    el.style.left = `calc(${k.x / 15 * 100}% + 2px)`;
-    el.style.top = `calc(${k.y / 5 * 100}% + 2px)`;
-    el.style.width = `calc(${k.w / 15 * 100}% - 4px)`;
-    el.style.height = `calc(${100 / 5}% - 4px)`;
+    const g = 0.06; // half of the gap between keys, in key units
+    el.style.left = `${(k.x + g) / 15 * 100}%`;
+    el.style.top = `${(k.y + g) / 6 * 100}%`;
+    el.style.width = `${(k.w - 2 * g) / 15 * 100}%`;
+    el.style.height = `${(k.h - 2 * g) / 6 * 100}%`;
     kb.appendChild(el);
   });
   kbIso = settings.iso;
   kbLayout = null;
+  setCaps(capsState);
 }
 function renderKeyboard(L) {
   if (kbIso !== settings.iso) buildKeyboard();
   if (kbLayout === L) return;
   kbLayout = L;
   for (const el of $('kb').children) el.innerHTML = keyInner(el.dataset.code, L);
+}
+
+/* ---------- pressed keys & flashes ---------- */
+const downCodes = new Set();
+let capsState = false;
+const keyEl = code => $('kb').querySelector(`[data-code="${code}"]`);
+const reducedMotion = () => { try { return window.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+function setDown(code, on) {
+  if (!code) return;
+  if (on) downCodes.add(code); else downCodes.delete(code);
+  const el = keyEl(code);
+  if (el) el.classList.toggle('down', on);
+}
+function releaseAll() {
+  downCodes.clear();
+  for (const el of $('kb').querySelectorAll('.down')) el.classList.remove('down');
+}
+function setCaps(on) {
+  capsState = on;
+  const el = keyEl('CapsLock');
+  if (el) el.classList.toggle('caps-on', on);
+}
+function clearFlashes() {
+  for (const el of $('kb').querySelectorAll('.fl')) el.classList.remove('fl', 'fl-ok', 'fl-bad', 'fl-warn');
+}
+function flash(code, kind) {
+  const el = keyEl(code);
+  if (!el) return;
+  el.classList.remove('fl', 'fl-ok', 'fl-bad', 'fl-warn');
+  void el.offsetWidth; // restart the animation
+  el.classList.add('fl', 'fl-' + kind);
+  // with reduced motion the coloured frame stays until the next key press
+  if (!reducedMotion()) setTimeout(() => el.classList.remove('fl', 'fl-' + kind), 260);
+}
+function trackKeyDown(e) {
+  clearFlashes();
+  if (e.code === 'CapsLock') {
+    // on a Mac keydown/keyup of caps lock mean "turned on/off", so only blink it
+    setDown('CapsLock', true);
+    setTimeout(() => setDown('CapsLock', false), 150);
+  } else setDown(e.code, true);
+  setCaps(capsOn(e));
+}
+function trackKeyUp(e) {
+  setDown(e.code, false);
+  // macOS sends no keyup for keys pressed while command is held (and Ctrl+Space switches the input source)
+  if (/^(Meta|Control)/.test(e.code)) for (const c of [...downCodes]) if (!MODIFIER_CODES.has(c)) setDown(c, false);
+  setCaps(capsOn(e));
 }
 
 // key + shift side needed to type ch in layout L
@@ -845,6 +970,7 @@ function isTextField(t) {
 }
 
 function onKeyDown(e) {
+  trackKeyDown(e);
   if (e.code === 'ShiftLeft') shiftL = true;
   if (e.code === 'ShiftRight') shiftR = true;
   if (!e.shiftKey && e.key !== 'Shift') { shiftL = false; shiftR = false; }
@@ -862,6 +988,7 @@ function onKeyDown(e) {
   handleChar(e);
 }
 function onKeyUp(e) {
+  trackKeyUp(e);
   if (e.code === 'ShiftLeft') shiftL = false;
   if (e.code === 'ShiftRight') shiftR = false;
 }
@@ -884,11 +1011,17 @@ function handleChar(e) {
   if (actual && actual !== settings.lastLayout) { settings.lastLayout = actual; saveSettings(); }
   S.keys++;
 
-  if (e.altKey) return miss('Option не нужен: нажми клавишу без Option.', 'err');
+  if (e.altKey) {
+    addConfusion(L, exp, e.key);
+    flash(e.code, 'bad');
+    return miss('Option не нужен: нажми клавишу без Option.', 'err');
+  }
 
   if (e.key === exp) {
     const need = wrongShift(e);
+    flash(e.code, need ? 'warn' : 'ok');
     if (need) {
+      addShiftConfusion(L, exp, need === 'L' ? 'R' : 'L');
       const txt = hintLevel() === 'none' ? 'Shift не той рукой.' :
         `Shift не той рукой: для «${exp}» нужен ${need === 'L' ? 'левый' : 'правый'} Shift.`;
       if (settings.strict) {
@@ -905,15 +1038,30 @@ function handleChar(e) {
     return advance(now, actual && actual !== L && (exp in REV[actual]) ? actual : L);
   }
 
+  addConfusion(L, exp, e.key);
   const caps = capsOn(e);
   const isLayoutErr = charFor(L, e.code, e.shiftKey, caps) === exp ||
     (L === 'RU' && isLat(e.key)) || (L === 'EN' && isCyr(e.key));
+  flash(e.code, isLayoutErr ? 'warn' : 'bad');
   if (isLayoutErr) {
     if (!S.posLayout) S.layoutErr++;
     S.posLayout = true;
     return miss(hintLevel() === 'none' ? 'Переключи раскладку (Ctrl+Space).' : `Переключи раскладку (Ctrl+Space): нужна ${L}.`, 'err');
   }
   return hintLevel() === 'none' ? miss('Ошибка.', 'err') : miss('', '');
+}
+
+// "expected -> pressed" pairs, kept per expected char (older stats simply lack them)
+function addConfusion(L, exp, pressed) {
+  const st = statOf(L, exp);
+  const x = st.x || (st.x = {});
+  if (pressed in x || Object.keys(x).length < 30) x[pressed] = (x[pressed] || 0) + 1;
+}
+// which Shift was pressed instead of the right one: sx = {L: n, R: n}
+function addShiftConfusion(L, exp, pressedSide) {
+  const st = statOf(L, exp);
+  const sx = st.sx || (st.sx = {});
+  sx[pressedSide] = (sx[pressedSide] || 0) + 1;
 }
 
 function miss(text, kind) {
@@ -951,10 +1099,12 @@ function finish() {
   const wpm = Math.round(S.text.length / 5 / min);
   const acc = S.keys ? Math.round(1000 * S.correct / S.keys) / 10 : 100;
   history.push({
-    t: Date.now(), mode: S.mode, chars: S.text.length, wpm, acc,
+    t: Date.now(), mode: S.mode, chars: S.text.length, wpm, acc, ms: Math.round(S.lastT - S.startT),
     errors: S.errors, layoutErr: S.layoutErr, shiftErr: S.shiftErr, shiftWarn: S.shiftWarn
   });
   if (history.length > 50) history = history.slice(-50);
+  totals.lessons++;
+  totals.ms += Math.round(S.lastT - S.startT);
   saveStats();
   update();
   $('text').classList.add('hidden');
@@ -1093,12 +1243,123 @@ function renderReset(confirming) {
   const yes = document.createElement('button');
   yes.className = 'primary';
   yes.textContent = 'Да, удалить всё';
-  yes.onclick = () => { stats = {}; history = []; store.del(K_STATS); store.del(K_HIST); renderStats(); };
+  yes.onclick = () => {
+    stats = {}; history = []; totals = { lessons: 0, ms: 0 };
+    store.del(K_STATS); store.del(K_HIST); store.del(K_TOTALS); renderStats();
+  };
   const no = document.createElement('button');
   no.textContent = 'Отмена';
   no.onclick = () => renderReset(false);
   wrap.append('Точно? Статистика и история уроков удалятся без возврата.', yes, no);
   box.appendChild(wrap);
+}
+
+/* ---------- report for Claude ---------- */
+const MODE_NAMES = { digits: 'Цифры', symRU: 'Знаки RU', symEN: 'Знаки EN', mixed: 'Смешанный', custom: 'Свой текст' };
+const HINT_NAMES = { full: 'полная', demand: 'по запросу', none: 'без подсказок' };
+const KB_NAMES = { labels: 'с подписями', colors: 'только цвета', hidden: 'скрыта' };
+const qch = c => c === ' ' ? 'пробел' : '«' + c + '»';
+const fmt1 = n => String(Math.round(n * 10) / 10).replace('.', ',');
+const ddmm = t => { const d = new Date(t); return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+// physical key by the US label, e.g. "Shift+6"
+function keyLabel(ch, L) {
+  const k = keyFor(ch, L);
+  if (!k) return '?';
+  const name = k.code === 'Space' ? 'пробел' : EN[k.code][0].toUpperCase();
+  return (k.shift ? 'Shift+' : '') + name;
+}
+
+function buildReport(lim) {
+  const out = [];
+  const now = Date.now(), d = new Date(now);
+  const week = history.filter(x => now - x.t <= 7 * 864e5);
+  const mins = ms => Math.round(ms / 60000);
+  out.push(`# Тренажёр знаков: отчёт ${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`);
+  out.push(`Раскладки: Russian – PC и English (US), MacBook. Клавиши указаны по US-маркировке; Shift нужен противоположной рукой.`);
+  out.push(`Уроков всего: ${totals.lessons} (~${mins(totals.ms)} мин); за 7 дней: ${week.length} (~${mins(week.reduce((a, x) => a + lessonMs(x), 0))} мин).`);
+  if (totals.lessons < 5) out.push(`Данных мало: меньше 5 уроков, выводы предварительные.`);
+  out.push('', '## Настройки');
+  out.push(`Строгий Shift: ${settings.strict ? 'вкл' : 'выкл'}. Клавиатура ${settings.iso ? 'ISO' : 'ANSI'}.`);
+  out.push('Подсказка / клавиатура: ' + Object.keys(MODE_NAMES).map(m =>
+    `${MODE_NAMES[m]}: ${HINT_NAMES[settings.hint[m]]} / ${KB_NAMES[settings.kbView[m]]}`).join('; ') + '.');
+
+  out.push('', '## Режимы: последние 10 уроков (предыдущие 10)');
+  const avg = (arr, f) => arr.reduce((a, x) => a + f(x), 0) / arr.length;
+  let anyMode = false;
+  Object.keys(MODE_NAMES).forEach(m => {
+    const hs = history.filter(x => x.mode === m);
+    if (!hs.length) return;
+    anyMode = true;
+    const last = hs.slice(-10), prev = hs.slice(-20, -10);
+    let line = `- ${MODE_NAMES[m]}: ${Math.round(avg(last, x => x.wpm))} wpm, ${fmt1(avg(last, x => x.acc))}%`;
+    line += prev.length ? ` (было ${Math.round(avg(prev, x => x.wpm))} wpm, ${fmt1(avg(prev, x => x.acc))}%)` : ' (раньше уроков не было)';
+    out.push(line + `, уроков ${hs.length}`);
+  });
+  if (!anyMode) out.push('Уроков пока нет.');
+
+  const rows = Object.keys(stats).map(k => {
+    const s = stats[k];
+    return { L: k.slice(0, 2), ch: k.slice(3), s, er: s.a ? s.e / s.a : 0, avg: s.n ? s.t / s.n : null };
+  });
+  const g = globalAvgTime();
+  ['RU', 'EN'].forEach(L => {
+    const w = rows.filter(r => r.L === L && r.s.a >= 3 && !isLetter(r.ch) && r.ch !== ' ')
+      .map(r => Object.assign(r, { score: r.er * 4 + (r.avg != null ? r.avg : g) / 1000 }))
+      .sort((a, b) => b.score - a.score).slice(0, lim.worst);
+    out.push('', `## Худшие знаки ${L} (символ, клавиша: попыток / ошибок / мс)`);
+    if (!w.length) out.push('Мало данных.');
+    w.forEach(r => out.push(`${qch(r.ch)} (${keyLabel(r.ch, L)}): ${r.s.a} / ${Math.round(r.er * 100)}% / ${r.avg != null ? Math.round(r.avg) : '—'}`));
+  });
+
+  const conf = [];
+  rows.forEach(r => { if (r.s.x) Object.keys(r.s.x).forEach(p => conf.push({ r, p, n: r.s.x[p] })); });
+  conf.sort((a, b) => b.n - a.n);
+  out.push('', '## Частые путаницы (ожидалось → нажато)');
+  if (!conf.length) out.push('Пока не записаны.');
+  conf.slice(0, 10).forEach(c => out.push(`${qch(c.r.ch)} ${c.r.L} → ${qch(c.p)}: ${c.n}`));
+
+  const top = (f, n) => rows.filter(r => f(r) > 0).sort((a, b) => f(b) - f(a)).slice(0, n);
+  const le = rows.reduce((a, r) => a + (r.s.le || 0), 0);
+  out.push('', '## Ошибки раскладки');
+  out.push(le ? `Всего ${le}. Чаще всего: ` + top(r => r.s.le || 0, 6).map(r => `${qch(r.ch)} ${r.L} ${r.s.le}`).join(', ') + '.' : 'Нет.');
+
+  const se = rows.reduce((a, r) => a + (r.s.se || 0), 0);
+  out.push('', '## Ошибки Shift');
+  out.push(se ? `Всего ${se}. Чаще всего: ` + top(r => r.s.se || 0, 6).map(r => `${qch(r.ch)} ${r.L} ${r.s.se}`).join(', ') + '.' : 'Нет.');
+  const sx = [];
+  rows.forEach(r => { if (r.s.sx) Object.keys(r.s.sx).forEach(side => sx.push({ r, side, n: r.s.sx[side] })); });
+  sx.sort((a, b) => b.n - a.n).slice(0, 6).forEach(x =>
+    out.push(`${qch(x.r.ch)} ${x.r.L}: ${x.side === 'R' ? 'правый вместо левого' : 'левый вместо правого'}: ${x.n}`));
+
+  out.push('', `## Последние уроки (${Math.min(lim.lessons, history.length)})`);
+  if (!history.length) out.push('Пока нет.');
+  history.slice(-lim.lessons).reverse().forEach(x => out.push(
+    `${ddmm(x.t)} ${MODE_NAMES[x.mode] || x.mode}: ${x.wpm} wpm, ${fmt1(x.acc)}%, раскладка ${x.layoutErr}, Shift ${x.shiftErr}`));
+  return out.join('\n');
+}
+// keep the report under ~3000 chars by shortening the lists
+function makeReport() {
+  const steps = [{ worst: 15, lessons: 15 }, { worst: 12, lessons: 12 }, { worst: 10, lessons: 10 }, { worst: 7, lessons: 8 }, { worst: 5, lessons: 5 }];
+  let t = '';
+  for (const lim of steps) { t = buildReport(lim); if (t.length <= 3000) return t; }
+  return t.slice(0, 3000);
+}
+function onReportClick() {
+  const text = makeReport();
+  const msg = $('reportMsg'), out = $('reportOut');
+  const manual = () => {
+    out.value = text;
+    out.classList.remove('hidden');
+    out.focus();
+    out.select();
+    msg.textContent = 'Скопируй вручную: Cmd+C';
+    msg.className = 'err';
+  };
+  const ok = () => { out.classList.add('hidden'); msg.textContent = 'Скопировано'; msg.className = 'ok'; };
+  try {
+    if (!navigator.clipboard || !navigator.clipboard.writeText) return manual();
+    navigator.clipboard.writeText(text).then(ok, manual);
+  } catch (e) { manual(); }
 }
 
 /* ---------- tabs & init ---------- */
@@ -1118,6 +1379,7 @@ function init() {
     if (S && !S.done) { armReveal(); update(); }
   };
   $('kbSel').onchange = e => { settings.kbView[settings.mode] = e.target.value; saveSettings(); e.target.blur(); applyView(); };
+  $('reportBtn').onclick = onReportClick;
   $('stLayout').onchange = renderStats;
   $('stNoLetters').onchange = renderStats;
   $('optStrict').checked = settings.strict;
@@ -1129,8 +1391,9 @@ function init() {
   if (!store.works()) $('storageNote').textContent = 'localStorage недоступен: статистика и настройки не сохранятся после закрытия страницы.';
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
-  window.addEventListener('blur', () => { shiftL = shiftR = false; });
-  document.addEventListener('visibilitychange', () => { if (document.hidden) saveStats(); });
+  // after Cmd+Tab no keyup arrives: drop every key that looks held
+  window.addEventListener('blur', () => { shiftL = shiftR = false; releaseAll(); });
+  document.addEventListener('visibilitychange', () => { shiftL = shiftR = false; releaseAll(); if (document.hidden) saveStats(); });
   window.addEventListener('pagehide', saveStats);
   buildKeyboard();
   setMode(settings.mode);
@@ -1140,7 +1403,7 @@ init();
 // hooks for automated tests
 window.__tt = {
   get state() { return S; }, get settings() { return settings; }, get stats() { return stats; },
-  load: text => startLesson(text), generate, typeable, assignLayouts
+  load: text => startLesson(text), generate, typeable, assignLayouts, report: makeReport
 };
 </script>
 </body>
