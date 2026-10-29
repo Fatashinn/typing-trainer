@@ -43,7 +43,7 @@
   --pale: rgba(255, 255, 255, .5);
   --caps-off: rgba(0, 0, 0, .25);
   --touch-ring: rgba(0, 0, 0, .35);
-  --flash-ok: #2fbf4a;
+  --flash-ok: rgba(0, 0, 0, .3);
   --flash-bad: #e53935;
   --flash-warn: #f2c200;
 }
@@ -86,7 +86,7 @@
     --pale: rgba(23, 25, 28, .5);
     --caps-off: rgba(255, 255, 255, .25);
     --touch-ring: rgba(255, 255, 255, .4);
-    --flash-ok: #3ddc5a;
+    --flash-ok: rgba(0, 0, 0, .45);
     --flash-bad: #ff5a52;
     --flash-warn: #ffd23f;
   }
@@ -191,7 +191,7 @@ textarea { width: 100%; min-height: 90px; background: var(--bg); border: 1px sol
 .f-ri { background: var(--f-ri); } .f-rm { background: var(--f-rm); }
 .f-rr { background: var(--f-rr); } .f-rp { background: var(--f-rp); }
 .f-th { background: var(--f-th); }
-/* short flash after a key press: green ok, red wrong key, yellow layout/Shift */
+/* short flash after a key press: grey dimming ok, red wrong key, yellow layout/Shift */
 .key.fl-ok { --fl: var(--flash-ok); } .key.fl-bad { --fl: var(--flash-bad); } .key.fl-warn { --fl: var(--flash-warn); }
 .key.fl::before {
   content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; z-index: 1;
