@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Тренажёр знаков</title>
+<style>
+:root {
+  --bg: #f7f7f5;
+  --panel: #ffffff;
+  --fg: #1f2328;
+  --muted: #6b7078;
+  --border: #d9dbde;
+  --accent: #2f6fd6;
+  --done: #9aa0a6;
+  --cur-bg: #dfe9fb;
+  --err: #c62828;
+  --err-bg: #fde3e3;
+  --warn: #a45a00;
+  --warn-bg: #fff1d6;
+  --ok: #2e7d32;
+  --ring: #1f2328;
+  --key-fg: #1f2328;
+  --key-alt: rgba(31, 35, 40, .5);
+  --en-mark: #2f6fd6;
+  --f-lp: #98bf84;
+  --f-lr: #bcbc4a;
+  --f-lm: #f0bf50;
+  --f-li: #8ba69a;
+  --f-ri: #c98898;
+  --f-rm: #f0bf50;
+  --f-rr: #bcbc4a;
+  --f-rp: #98bf84;
+  --f-th: #c86a5a;
+  --row-bad: #fde3e3;
+  --row-mid: #fff1d6;
+  --row-good: #e5f3e6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17191c;
+    --panel: #202328;
+    --fg: #e6e8eb;
+    --muted: #9aa0a8;
+    --border: #353a41;
+    --accent: #7aa7f0;
+    --done: #6b7179;
+    --cur-bg: #2c3d5c;
+    --err: #ff7b72;
+    --err-bg: #4a2323;
+    --warn: #f0b35a;
+    --warn-bg: #43341b;
+    --ok: #7bc47f;
+    --ring: #ffffff;
+    --key-fg: #eef0f2;
+    --key-alt: rgba(238, 240, 242, .55);
+    --en-mark: #7aa7f0;
+    --f-lp: #4f6845;
+    --f-lr: #66662a;
+    --f-lm: #85692c;
+    --f-li: #4b5f56;
+    --f-ri: #744a58;
+    --f-rm: #85692c;
+    --f-rr: #66662a;
+    --f-rp: #4f6845;
+    --f-th: #743d33;
+    --row-bad: #4a2323;
+    --row-mid: #43341b;
+    --row-good: #1f3a22;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+.wrap { max-width: 920px; margin: 0 auto; padding: 12px 16px 40px; }
+header { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin-bottom: 12px; }
+h1 { font-size: 18px; margin: 0; font-weight: 600; }
+button, select, input, textarea { font: inherit; color: inherit; }
+button {
+  background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  padding: 5px 10px; cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+@media (prefers-color-scheme: dark) { button.primary { color: #10141a; } }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; }
+.seg button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+@media (prefers-color-scheme: dark) { .seg button[aria-pressed="true"] { color: #10141a; } }
+.tabs { margin-left: auto; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+.hidden { display: none !important; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+
+/* trainer */
+#modeOpts { margin: 10px 0 0; }
+#modeOpts:empty { display: none; }
+details summary { cursor: pointer; color: var(--muted); }
+.syms { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; }
+.syms label { display: inline-flex; align-items: center; gap: 3px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+textarea { width: 100%; min-height: 90px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
+#textBox {
+  margin-top: 12px; min-height: 150px; position: relative;
+  font-size: 23px; line-height: 1.6; letter-spacing: .02em;
+}
+#text { white-space: pre-wrap; overflow-wrap: break-word; }
+#text span.d { color: var(--done); }
+#text span.d.x { color: var(--err); }
+#text span.c { background: var(--cur-bg); border-bottom: 2px solid var(--accent); }
+#text span.c.bad { background: var(--err-bg); border-bottom-color: var(--err); }
+#text span.en { text-decoration: underline dotted var(--en-mark); text-underline-offset: 5px; }
+#result { text-align: center; padding: 10px 0; }
+#result .big { font-size: 34px; font-weight: 600; }
+#result .grid { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 28px; margin: 8px 0 14px; }
+#result .grid div span { display: block; font-size: 13px; color: var(--muted); }
+#status { min-height: 26px; margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: center; font-size: 14px; }
+#msg { padding: 1px 8px; border-radius: 4px; }
+#msg.err { background: var(--err-bg); color: var(--err); }
+#msg.warn { background: var(--warn-bg); color: var(--warn); }
+#live { margin-left: auto; color: var(--muted); }
+
+/* keyboard */
+#kbWrap { margin-top: 10px; container-type: inline-size; }
+#kb { position: relative; width: 100%; aspect-ratio: 15 / 5; }
+.key {
+  position: absolute; border-radius: 6px; color: var(--key-fg);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 2.5cqw; line-height: 1.05; user-select: none;
+}
+.key .m { display: flex; flex-direction: column; align-items: center; }
+.key .m.one { font-size: 2.9cqw; }
+.key .alt {
+  position: absolute; top: .35cqw; right: .55cqw;
+  font-size: 1.45cqw; line-height: 1.05; color: var(--key-alt);
+  display: flex; flex-direction: column; align-items: flex-end;
+}
+.key .lbl { font-size: 1.55cqw; opacity: .8; }
+.key.next { outline: .45cqw solid var(--ring); outline-offset: .15cqw; z-index: 2; }
+.f-lp { background: var(--f-lp); } .f-lr { background: var(--f-lr); }
+.f-lm { background: var(--f-lm); } .f-li { background: var(--f-li); }
+.f-ri { background: var(--f-ri); } .f-rm { background: var(--f-rm); }
+.f-rr { background: var(--f-rr); } .f-rp { background: var(--f-rp); }
+.f-th { background: var(--f-th); }
+#hint { margin-top: 10px; text-align: center; font-size: 16px; min-height: 24px; }
+#hint b { font-size: 19px; padding: 0 4px; }
+
+/* stats */
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { font-weight: 600; color: var(--muted); }
+td.ch { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 16px; }
+tr.bad td { background: var(--row-bad); }
+tr.mid td { background: var(--row-mid); }
+tr.good td { background: var(--row-good); }
+.tscroll { overflow-x: auto; }
+h2 { font-size: 16px; margin: 18px 0 8px; }
+h2:first-child { margin-top: 0; }
+.confirm { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.settings label { display: flex; align-items: flex-start; gap: 8px; margin: 10px 0; }
+.settings p { margin: 2px 0 0 26px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Тренажёр знаков</h1>
+    <div class="seg tabs" id="tabs">
+      <button data-tab="train" aria-pressed="true">Тренировка</button>
+      <button data-tab="stats" aria-pressed="false">Статистика</button>
+      <button data-tab="settings" aria-pressed="false">Настройки</button>
+    </div>
+  </header>
+
+  <section id="tab-train">
+    <div class="row">
+      <div class="seg" id="modes">
+        <button data-mode="digits">Цифры</button>
+        <button data-mode="symRU">Знаки RU</button>
+        <button data-mode="symEN">Знаки EN</button>
+        <button data-mode="mixed">Смешанный</button>
+        <button data-mode="custom">Свой текст</button>
+      </div>
+      <button id="newBtn" title="Esc">Новый текст</button>
+    </div>
+    <div id="modeOpts"></div>
+    <div class="panel" id="textBox">
+      <div id="text"></div>
+      <div id="result" class="hidden"></div>
+    </div>
+    <div id="status"><span id="msg"></span><span id="live"></span></div>
+    <div id="kbWrap"><div id="kb"></div></div>
+    <div id="hint"></div>
+  </section>
+
+  <section id="tab-stats" class="hidden">
+    <div class="panel">
+      <h2>По символам</h2>
+      <div class="row small" style="margin-bottom:8px">
+        <label>Раскладка:
+          <select id="stLayout"><option value="">обе</option><option value="RU">RU</option><option value="EN">EN</option></select>
+        </label>
+        <label><input type="checkbox" id="stNoLetters" checked> только знаки и цифры</label>
+      </div>
+      <div class="tscroll"><table id="stTable"></table></div>
+      <p class="muted small">Сверху — худшие. Красный: ошибок ≥ 15% или нажатие ≥ 1 с; жёлтый: ошибок ≥ 5% или ≥ 0,6 с. Паузы дольше 2 с не учитываются.</p>
+      <h2>Последние уроки</h2>
+      <div class="tscroll"><table id="histTable"></table></div>
+      <h2>Сброс</h2>
+      <div id="resetBox"></div>
+    </div>
+  </section>
+
+  <section id="tab-settings" class="hidden">
+    <div class="panel settings">
+      <label><input type="checkbox" id="optStrict">
+        <span><b>Строгий Shift</b><br><span class="muted small">Shift не той рукой — ошибка, курсор стоит. Если выключено — только предупреждение.</span></span></label>
+      <label><input type="checkbox" id="optIso">
+        <span><b>ISO-клавиатура</b> (лишняя клавиша слева от Z)<br><span class="muted small">На Mac с ISO браузер иногда путает коды клавиш слева от 1 и слева от Z. Тренажёр проверяет нажатие по символу, так что на проверку это не влияет.</span></span></label>
+      <label><span><b>Раскладка в режиме «Цифры»</b>
+        <select id="optDigitsLayout"><option value="RU">RU</option><option value="EN">EN</option></select><br>
+        <span class="muted small">Влияет на подсказку и статистику. Знаки, общие для обеих раскладок, принимаются из любой.</span></span></label>
+      <p class="muted small" id="storageNote"></p>
+    </div>
+  </section>
+</div>
+
+<script>
+'use strict';
+
+/* ---------- storage (works without localStorage) ---------- */
+const store = {
+  mem: {},
+  get(k, def) {
+    let raw = null;
+    try { raw = window.localStorage.getItem(k); } catch (e) { raw = null; }
+    if (raw == null && k in this.mem) raw = this.mem[k];
+    if (raw == null) return def;
+    try { return JSON.parse(raw); } catch (e) { return def; }
+  },
+  set(k, v) {
+    const raw = JSON.stringify(v);
+    this.mem[k] = raw;
+    try { window.localStorage.setItem(k, raw); return true; } catch (e) { return false; }
+  },
+  del(k) {
+    delete this.mem[k];
+    try { window.localStorage.removeItem(k); } catch (e) { /* ignore */ }
+  },
+  works() {
+    try { const t = '__tt_test'; window.localStorage.setItem(t, '1'); window.localStorage.removeItem(t); return true; }
+    catch (e) { return false; }
+  }
+};
+const K_SETTINGS = 'tt.settings', K_STATS = 'tt.stats', K_HIST = 'tt.history', K_CUSTOM = 'tt.custom';
+
+/* ---------- layouts ---------- */
+const EN = {
+  Backquote: ['`', '~'], Digit1: ['1', '!'], Digit2: ['2', '@'], Digit3: ['3', '#'], Digit4: ['4', '$'],
+  Digit5: ['5', '%'], Digit6: ['6', '^'], Digit7: ['7', '&'], Digit8: ['8', '*'], Digit9: ['9', '('],
+  Digit0: ['0', ')'], Minus: ['-', '_'], Equal: ['=', '+'], BracketLeft: ['[', '{'], BracketRight: [']', '}'],
+  Backslash: ['\\', '|'], Semicolon: [';', ':'], Quote: ["'", '"'], Comma: [',', '<'], Period: ['.', '>'],
+  Slash: ['/', '?'], IntlBackslash: ['\\', '|'], Space: [' ', ' ']
+};
+'qwertyuiopasdfghjklzxcvbnm'.split('').forEach(c => { EN['Key' + c.toUpperCase()] = [c, c.toUpperCase()]; });
+
+const RU = {
+  Backquote: ['ё', 'Ё'], Digit1: ['1', '!'], Digit2: ['2', '"'], Digit3: ['3', '№'], Digit4: ['4', ';'],
+  Digit5: ['5', '%'], Digit6: ['6', ':'], Digit7: ['7', '?'], Digit8: ['8', '*'], Digit9: ['9', '('],
+  Digit0: ['0', ')'], Minus: ['-', '_'], Equal: ['=', '+'], Slash: ['.', ','], Backslash: ['\\', '/'],
+  IntlBackslash: ['\\', '/'], Space: [' ', ' ']
+};
+const RU_LETTERS = {
+  KeyQ: 'й', KeyW: 'ц', KeyE: 'у', KeyR: 'к', KeyT: 'е', KeyY: 'н', KeyU: 'г', KeyI: 'ш', KeyO: 'щ', KeyP: 'з',
+  BracketLeft: 'х', BracketRight: 'ъ', KeyA: 'ф', KeyS: 'ы', KeyD: 'в', KeyF: 'а', KeyG: 'п', KeyH: 'р',
+  KeyJ: 'о', KeyK: 'л', KeyL: 'д', Semicolon: 'ж', Quote: 'э', KeyZ: 'я', KeyX: 'ч', KeyC: 'с', KeyV: 'м',
+  KeyB: 'и', KeyN: 'т', KeyM: 'ь', Comma: 'б', Period: 'ю'
+};
+Object.keys(RU_LETTERS).forEach(code => { const c = RU_LETTERS[code]; RU[code] = [c, c.toUpperCase()]; });
+const MAPS = { RU, EN };
+const OTHER = { RU: 'EN', EN: 'RU' };
+
+const FINGER_KEYS = {
+  lp: 'Backquote Digit1 KeyQ KeyA KeyZ Tab CapsLock ShiftLeft IntlBackslash',
+  lr: 'Digit2 KeyW KeyS KeyX',
+  lm: 'Digit3 KeyE KeyD KeyC',
+  li: 'Digit4 Digit5 KeyR KeyT KeyF KeyG KeyV KeyB',
+  ri: 'Digit6 Digit7 KeyY KeyU KeyH KeyJ KeyN KeyM',
+  rm: 'Digit8 KeyI KeyK Comma',
+  rr: 'Digit9 KeyO KeyL Period',
+  rp: 'Digit0 Minus Equal KeyP BracketLeft BracketRight Backslash Semicolon Quote Slash Enter Backspace ShiftRight',
+  th: 'Space'
+};
+const FINGER = {};
+Object.keys(FINGER_KEYS).forEach(f => FINGER_KEYS[f].split(' ').forEach(c => { FINGER[c] = f; }));
+const FINGER_NAME = {
+  lp: 'левый мизинец', lr: 'левый безымянный', lm: 'левый средний', li: 'левый указательный',
+  ri: 'правый указательный', rm: 'правый средний', rr: 'правый безымянный', rp: 'правый мизинец', th: 'большой палец'
+};
+
+function geometry(iso) {
+  const rows = [
+    [['Backquote', 1], ...'1234567890'.split('').map(d => ['Digit' + d, 1]), ['Minus', 1], ['Equal', 1], ['Backspace', 2]],
+    [['Tab', 1.5], ...'QWERTYUIOP'.split('').map(c => ['Key' + c, 1]), ['BracketLeft', 1], ['BracketRight', 1], ['Backslash', 1.5]],
+    [['CapsLock', 1.75], ...'ASDFGHJKL'.split('').map(c => ['Key' + c, 1]), ['Semicolon', 1], ['Quote', 1], ['Enter', 2.25]],
+    [...(iso ? [['ShiftLeft', 1.25], ['IntlBackslash', 1]] : [['ShiftLeft', 2.25]]),
+      ...'ZXCVBNM'.split('').map(c => ['Key' + c, 1]), ['Comma', 1], ['Period', 1], ['Slash', 1], ['ShiftRight', 2.75]],
+    [['Space', 6.25, 3.75]]
+  ];
+  const keys = [];
+  rows.forEach((row, y) => {
+    let x = 0;
+    row.forEach(([code, w, x0]) => {
+      if (x0 != null) x = x0;
+      keys.push({ code, w, x, y });
+      x += w;
+    });
+  });
+  return keys;
+}
+const SPECIAL_LABEL = { Backspace: '⌫', Tab: 'tab', CapsLock: 'caps lock', Enter: 'return', ShiftLeft: 'shift', ShiftRight: 'shift', Space: '' };
+
+// char -> {code, shift} for each layout
+const REV = { RU: {}, EN: {} };
+['RU', 'EN'].forEach(L => {
+  const order = geometry(false).map(k => k.code);
+  order.forEach(code => {
+    const m = MAPS[L][code];
+    if (!m) return;
+    [0, 1].forEach(s => { if (!(m[s] in REV[L])) REV[L][m[s]] = { code, shift: !!s }; });
+  });
+});
+const isCyr = ch => /^[а-яё]$/i.test(ch);
+const isLat = ch => /^[a-z]$/i.test(ch);
+const isLetter = ch => isCyr(ch) || isLat(ch);
+const typeable = ch => ch in REV.RU || ch in REV.EN;
+const shared = ch => ch in REV.RU && ch in REV.EN;
+
+function assignLayouts(text, fallback) {
+  const n = text.length, res = new Array(n), left = new Array(n);
+  const lt = ch => isCyr(ch) ? 'RU' : isLat(ch) ? 'EN' : null;
+  let last = null;
+  for (let i = 0; i < n; i++) { const l = lt(text[i]); if (l) last = l; left[i] = last; }
+  let next = null;
+  for (let i = n - 1; i >= 0; i--) { const l = lt(text[i]); if (l) next = l; res[i] = left[i] || next || fallback; }
+  for (let i = 0; i < n; i++) {
+    const ch = text[i], r = ch in REV.RU, e = ch in REV.EN;
+    if (r && !e) res[i] = 'RU'; else if (e && !r) res[i] = 'EN';
+  }
+  return res;
+}
+
+function charFor(L, code, shift, caps) {
+  const m = MAPS[L][code];
+  if (!m) return null;
+  let c = m[shift ? 1 : 0];
+  if (caps && isLetter(c)) c = c.toUpperCase();
+  return c;
+}
+
+// which layout the user is actually in, judging by this key event
+function detectLayout(e) {
+  const k = e.key;
+  if (isLat(k)) return 'EN';
+  if (isCyr(k)) return 'RU';
+  if (e.code === 'Backquote' || e.code === 'IntlBackslash') return null;
+  const caps = capsOn(e);
+  const r = charFor('RU', e.code, e.shiftKey, caps) === k;
+  const en = charFor('EN', e.code, e.shiftKey, caps) === k;
+  if (r && !en) return 'RU';
+  if (en && !r) return 'EN';
+  return null;
+}
+function capsOn(e) { try { return !!(e.getModifierState && e.getModifierState('CapsLock')); } catch (err) { return false; } }
+
+/* ---------- word lists ---------- */
+const WORDS_RU = ('время год день дело жизнь рука раз работа слово место вопрос сторона страна мир случай голова ребёнок ' +
+  'сила конец вид система часть город отношение женщина деньги земля машина вода отец проблема час право нога решение ' +
+  'дверь образ история власть закон война голос книга возможность результат ночь стол имя область статья число ' +
+  'компания народ жена группа развитие процесс суд условие средство начало свет пора путь душа уровень форма связь ' +
+  'минута улица вечер качество мысль дорога мать действие месяц государство язык любовь взгляд мама век школа цель ' +
+  'общество деятельность организация президент комната порядок момент театр письмо урок текст задача проект неделя ' +
+  'курс экзамен план срок друг учёба утро ответ пример список файл папка ссылка тема заметка оценка балл ' +
+  'быть мочь сказать говорить знать стать есть хотеть видеть идти стоять думать получить жить делать ' +
+  'понимать помнить писать читать учить открыть найти начать сдать прислать проверить ' +
+  'новый большой хороший последний русский главный другой нужный важный старый простой лёгкий трудный быстрый ' +
+  'сегодня завтра вчера сейчас потом всегда часто снова уже ещё тоже очень просто вместе почти долго скоро ' +
+  'здесь там дома вечером утром можно нужно надо легко рано поздно точно').split(' ');
+const WORDS_EN = ('time year people way day man thing woman life child world school state family student group country ' +
+  'problem hand part place case week company system program question work government number night point home water ' +
+  'room mother area money story fact month lot right study book eye job word business issue side kind head house ' +
+  'service friend father power hour game line end member law car city community name team minute idea kid body ' +
+  'information back parent face others level office door health person art war history party result change morning ' +
+  'reason research girl guy moment air teacher force education task test essay exam course lesson note file ' +
+  'be have do say get make go know take see come think look want give use find tell ask work seem feel try leave ' +
+  'call keep let begin help talk turn start show hear play run move like live believe write read learn send check ' +
+  'good new first last long great little own other old right big high different small large next early young ' +
+  'important few public bad same able clear easy hard fast simple ready free sure ' +
+  'today tomorrow now then always often again also very just still never soon here there later together').split(' ');
+const EN_CONTRACTIONS = ["it's", "don't", "I'm", "can't", "won't", "that's", "let's", "you're", "isn't", "we'll",
+  "didn't", "there's", "doesn't", "I've", "they're", "what's", "aren't", "she's", "wasn't", "I'd"];
+const EN_INSERTS = ['Settings', 'Keyboard', 'Moodle', 'Obsidian', 'Google Docs', 'iPhone', 'MacBook', 'email', 'deadline',
+  'IELTS', 'Zoom', 'Claude Code', 'GitHub', 'Telegram', 'Notion', 'Safari', 'Chrome', 'Writing Task 2', 'Speaking',
+  'Listening', 'Campus France', 'Parcoursup', 'Duolingo', 'Quizlet', 'Spotify', 'Apple ID', 'Wi-Fi', 'App Store',
+  'Finder', 'PDF', 'Excel', 'PowerPoint', 'Google Calendar', 'YouTube', 'keybr', 'DELF', 'Gmail', 'Dropbox', 'Canva',
+  'ChatGPT', 'Anki', 'Trello', 'Slack', 'feedback', 'Space', 'Shift', 'Option', 'Control', 'Russian - PC'];
+const MIXED_TEMPLATES = [
+  'Открой {E} и проверь, всё ли работает.',
+  'Дедлайн по эссе в пятницу, напиши в {E}, если не успеваешь.',
+  'Скинь ссылку на {E} в чат, пожалуйста.',
+  'В {E} есть раздел {E}, там всё видно.',
+  'Сегодня урок по {E} в 18:30, не опаздывай!',
+  'Я перенёс заметки из {E} в {E}.',
+  'Зайди в {E} и выбери {E}.',
+  'Новый {E} пришёл вчера вечером.',
+  'Проверь {E}: там письмо от куратора.',
+  'Сколько баллов ты хочешь за {E}?',
+  'Созвон в {E} в 10:00, ссылка в {E}.',
+  'Задание лежит в {E}, срок - до 15 ноября.',
+  'Купил новый {E}, теперь всё быстрее.',
+  'На {E} ставлю 40 минут в день.',
+  'Запиши это в {E}, иначе забудешь.',
+  'Мой {E} опять просит обновление.',
+  'Для {E} нужен паспорт и фото.',
+  'Ответ пришёл на {E}, посмотри сам.',
+  'Слабое место - {E}, буду тренировать каждый день.',
+  'В {E} я веду список слов (около 300).',
+  'Почему {E} не открывается?',
+  'Сначала {E}, потом {E}, потом отдых.',
+  'Ученик прислал {E} с ошибками, проверю вечером.',
+  'Подготовка к {E}: неделя 3 из 12.',
+  'Включи {E}, а потом нажми {E}.',
+  'Попробуй {E} - это удобно.',
+  'Файл в {E} называется "План на месяц".',
+  'Расписание: понедельник - {E}, среда - {E}.',
+  'Скачай {E} из {E} и открой в {E}.',
+  'Пароль от {E} я поменял, не забудь!',
+  'Напомни про {E} завтра утром.',
+  'Тренирую слепую печать на {E} по 20 минут.',
+  'Где в {E} кнопка {E}?',
+  'Отправил {E} куратору, жду ответа.',
+  'Вчера сделал {E} за 35 минут, это рекорд.',
+  'Мне нужен {E} на французском, а не на английском.',
+  'Раскладку меняю через {E}, это быстро.',
+  'Итог недели: {E} - готово, {E} - нет.'
+];
+
+/* ---------- symbol toggles ---------- */
+const SYM_TOGGLES = {
+  RU: ['.', ',', '!', '?', ':', ';', '"', '()', '%', '№', '-', '_', '+', '=', '*', '/', '\\', '0-9'],
+  EN: ['.', ',', '!', '?', ':', ';', '"', "'", '()', '[]', '{}', '<>', '@', '#', '$', '%', '^', '&', '*', '-', '_',
+    '+', '=', '/', '\\', '|', '~', '`', '0-9']
+};
+const toggleChars = t => t === '0-9' ? '0123456789'.split('') : t.length === 2 && t !== '0-9' ? t.split('') : [t];
+
+/* ---------- settings / stats ---------- */
+const defaults = {
+  mode: 'symRU', strict: true, iso: false, digitsLayout: 'RU', lastLayout: 'RU',
+  symRU: Object.fromEntries(SYM_TOGGLES.RU.map(t => [t, true])),
+  symEN: Object.fromEntries(SYM_TOGGLES.EN.map(t => [t, true]))
+};
+const settings = Object.assign({}, defaults, store.get(K_SETTINGS, {}));
+settings.symRU = Object.assign({}, defaults.symRU, settings.symRU);
+settings.symEN = Object.assign({}, defaults.symEN, settings.symEN);
+const saveSettings = () => store.set(K_SETTINGS, settings);
+
+let stats = store.get(K_STATS, {});
+let history = store.get(K_HIST, []);
+const saveStats = () => { store.set(K_STATS, stats); store.set(K_HIST, history); };
+
+function statOf(L, ch) {
+  const k = L + '|' + ch;
+  return stats[k] || (stats[k] = { a: 0, e: 0, le: 0, se: 0, t: 0, n: 0 });
+}
+function globalAvgTime() {
+  let t = 0, n = 0;
+  Object.values(stats).forEach(s => { t += s.t; n += s.n; });
+  return n ? t / n : 400;
+}
+// how often a char should show up: weak (error-prone or slow) chars get more weight
+function weakness(L, ch, gAvg) {
+  const s = stats[L + '|' + ch];
+  if (!s || s.a < 3) return 2;
+  const errRate = s.e / s.a;
+  const avg = s.n ? s.t / s.n : gAvg;
+  return 1 + 8 * errRate + 2 * Math.max(0, (avg - gAvg) / gAvg);
+}
+
+/* ---------- random helpers ---------- */
+const rnd = n => Math.floor(Math.random() * n);
+const rint = (a, b) => a + rnd(b - a + 1);
+const pick = arr => arr[rnd(arr.length)];
+function pickWeighted(items, weights) {
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < items.length; i++) { r -= weights[i]; if (r <= 0) return items[i]; }
+  return items[items.length - 1];
+}
+const pad2 = n => String(n).padStart(2, '0');
+function capFirst(s) {
+  for (let i = 0; i < s.length; i++) {
+    if (isLetter(s[i])) return s.slice(0, i) + s[i].toUpperCase() + s.slice(i + 1);
+    if (/[0-9]/.test(s[i])) return s;
+  }
+  return s;
+}
+
+/* ---------- generators ---------- */
+const MIN_LEN = 200, MAX_LEN = 300;
+function fillLesson(next) {
+  let out = '';
+  for (let guard = 0; guard < 200; guard++) {
+    const piece = next();
+    const cand = out ? out + ' ' + piece : piece;
+    if (cand.length > MAX_LEN) { if (out.length >= MIN_LEN) break; else continue; }
+    out = cand;
+    if (out.length >= MIN_LEN + 30) break;
+  }
+  return out;
+}
+
+function genDigits() {
+  const L = settings.digitsLayout, g = globalAvgTime();
+  const digs = '0123456789'.split('');
+  const w = digs.map(d => weakness(L, d, g));
+  const d = () => pickWeighted(digs, w);
+  const num = (a, b) => { const len = rint(a, b); let s = d(); while (s === '0' && len > 1) s = d(); for (let i = 1; i < len; i++) s += d(); return s; };
+  const formats = [
+    () => num(3, 5),
+    () => num(3, 5),
+    () => num(2, 4) + ' ' + num(2, 4),
+    () => pad2(rint(1, 28)) + '.' + pad2(rint(1, 12)),
+    () => pad2(rint(1, 28)) + '.' + pad2(rint(1, 12)) + '.20' + pad2(rint(20, 30)),
+    () => pad2(rint(7, 23)) + ':' + pick(['00', '15', '30', '45', pad2(rint(0, 59))]),
+    () => '+7 (9' + d() + d() + ') ' + d() + d() + d() + '-' + d() + d() + '-' + d() + d(),
+    () => { const a = rint(2, 49), b = rint(2, 49); return a + ' + ' + b + ' = ' + (a + b); },
+    () => { const a = rint(20, 99), b = rint(2, a - 1); return a + ' - ' + b + ' = ' + (a - b); },
+    () => num(1, 2) + '%',
+    () => num(1, 1) + '/' + num(1, 2),
+    () => num(2, 3) + '-' + num(2, 3),
+    () => num(1, 2) + '.' + num(1, 2),
+    () => num(1, 2) + ',' + num(1, 1),
+    () => '(' + num(2, 3) + ')'
+  ];
+  return fillLesson(() => pick(formats)());
+}
+
+function symbolTemplates(L) {
+  const W = L === 'RU' ? WORDS_RU : WORDS_EN;
+  const w = () => pick(W);
+  const n = () => String(rint(1, 99));
+  const tp = (t, f) => ({ t: t.split(' '), f });
+  const common = [
+    tp(',', () => w() + ', ' + w()), tp(',', () => w() + ', ' + w() + ', ' + w()),
+    tp(':', () => w() + ': ' + w()), tp(';', () => w() + '; ' + w()),
+    tp('()', () => '(' + w() + ')'), tp('()', () => '(' + w() + ' ' + w() + ')'),
+    tp('"', () => '"' + w() + '"'),
+    tp('% 0-9', () => n() + '%'),
+    tp('-', () => w() + '-' + w()), tp('-', () => w() + ' - ' + w()),
+    tp('_', () => w() + '_' + w()),
+    tp('+ = 0-9', () => { const a = rint(1, 20), b = rint(1, 20); return a + ' + ' + b + ' = ' + (a + b); }),
+    tp('+ 0-9', () => n() + '+'),
+    tp('=', () => w() + ' = ' + w()),
+    tp('*', () => '*' + w() + '*'), tp('* 0-9', () => rint(2, 9) + ' * ' + rint(2, 9)),
+    tp('/', () => w() + '/' + w()), tp('/ 0-9', () => rint(1, 9) + '/' + rint(2, 9)),
+    tp('\\', () => w() + '\\' + w()),
+    tp('.', () => w() + '...'),
+    tp('0-9', () => String(rint(2, 2030))), tp('. 0-9', () => pad2(rint(1, 28)) + '.' + pad2(rint(1, 12))),
+    tp(': 0-9', () => rint(8, 22) + ':' + pick(['00', '15', '30', '45']))
+  ];
+  if (L === 'RU') {
+    return common.concat([
+      tp('№ 0-9', () => '№ ' + n()), tp('№ 0-9', () => '№' + n())
+    ]);
+  }
+  return common.concat([
+    tp("'", () => pick(EN_CONTRACTIONS)), tp("'", () => pick(EN_CONTRACTIONS)), tp("'", () => "'" + w() + "'"),
+    tp('@', () => w() + '@' + w() + '.com'), tp('@', () => '@' + w()),
+    tp('# 0-9', () => '#' + n()), tp('$ 0-9', () => '$' + n()),
+    tp('&', () => w() + ' & ' + w()),
+    tp('[]', () => '[' + w() + ']'), tp('{}', () => '{' + w() + '}'), tp('<>', () => '<' + w() + '>'),
+    tp('^ 0-9', () => rint(2, 9) + '^' + rint(2, 4)), tp('~ 0-9', () => '~' + n()),
+    tp('`', () => '`' + w() + '`'), tp('|', () => w() + ' | ' + w())
+  ]);
+}
+
+function genSymbols(L) {
+  const en = settings['sym' + L], g = globalAvgTime();
+  const tmplW = t => Math.max(...t.t.map(tg => { const cs = toggleChars(tg); return cs.reduce((a, c) => a + weakness(L, c, g), 0) / cs.length; }));
+  const tpls = symbolTemplates(L).filter(t => t.t.every(tg => en[tg]));
+  const tw = tpls.map(tmplW);
+  const terms = [];
+  if (en['.']) terms.push(['.', weakness(L, '.', g)], ['...', 0.3]);
+  if (en['!']) terms.push(['!', weakness(L, '!', g)]);
+  if (en['?']) terms.push(['?', weakness(L, '?', g)]);
+  if (en['!'] && en['?']) terms.push(['?!', 0.3]);
+  const W = L === 'RU' ? WORDS_RU : WORDS_EN;
+  return fillLesson(() => {
+    const parts = [], len = rint(3, 6);
+    for (let i = 0; i < len; i++) parts.push(tpls.length && Math.random() < 0.6 ? pickWeighted(tpls, tw).f() : pick(W));
+    let s = parts.join(' ');
+    if (terms.length) s = capFirst(s + pickWeighted(terms.map(t => t[0]), terms.map(t => t[1])));
+    return s;
+  });
+}
+
+function genMixed() {
+  return fillLesson(() => pick(MIXED_TEMPLATES).replace(/\{E\}/g, () => pick(EN_INSERTS)));
+}
+
+function normalizeText(s) {
+  return String(s)
+    .replace(/[«»“”„]/g, '"').replace(/[‘’ʼ]/g, "'").replace(/[—–−]/g, '-').replace(/…/g, '...')
+    .replace(/\s+/g, ' ')
+    .split('').filter(typeable).join('')
+    .replace(/ {2,}/g, ' ').trim();
+}
+function genCustom() {
+  const c = store.get(K_CUSTOM, { text: '', offset: 0 });
+  const t = normalizeText(c.text || '');
+  if (!t) return '';
+  let off = c.offset || 0;
+  if (off >= t.length) off = 0;
+  let end = Math.min(t.length, off + MAX_LEN);
+  if (end < t.length) {
+    const sp = t.lastIndexOf(' ', end);
+    if (sp > off + MIN_LEN / 2) end = sp;
+  }
+  const chunk = t.slice(off, end).trim();
+  c.offset = end >= t.length ? 0 : end + 1;
+  store.set(K_CUSTOM, c);
+  return chunk;
+}
+
+function generate(mode) {
+  if (mode === 'digits') return genDigits();
+  if (mode === 'symRU') return genSymbols('RU');
+  if (mode === 'symEN') return genSymbols('EN');
+  if (mode === 'mixed') return genMixed();
+  return genCustom();
+}
+function fallbackLayout(mode) {
+  if (mode === 'digits') return settings.digitsLayout;
+  if (mode === 'symEN') return 'EN';
+  if (mode === 'symRU' || mode === 'mixed') return 'RU';
+  return settings.lastLayout || 'RU';
+}
+
+/* ---------- lesson state ---------- */
+const $ = id => document.getElementById(id);
+let S = null;
+let shiftL = false, shiftR = false;
+let tab = 'train';
+
+function startLesson(text) {
+  text = text == null ? generate(settings.mode) : text;
+  S = {
+    mode: settings.mode, text, layouts: assignLayouts(text, fallbackLayout(settings.mode)),
+    pos: 0, startT: 0, lastT: 0, done: false,
+    keys: 0, correct: 0, errors: 0, layoutErr: 0, shiftErr: 0, shiftWarn: 0,
+    posErr: false, posLayout: false, posShift: false, errAt: new Set(), sinceSave: 0
+  };
+  $('result').classList.add('hidden');
+  $('text').classList.remove('hidden');
+  renderText();
+  setMsg('', '');
+  update();
+}
+
+function renderText() {
+  const box = $('text');
+  box.textContent = '';
+  if (!S.text) {
+    box.innerHTML = '<span class="muted" style="font-size:16px">' +
+      (S.mode === 'custom' ? 'Вставь текст в поле выше и нажми «Начать».' : 'Нет текста: включи хотя бы один знак.') + '</span>';
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  for (let i = 0; i < S.text.length; i++) {
+    const sp = document.createElement('span');
+    sp.textContent = S.text[i];
+    if (S.layouts[i] === 'EN' && S.mode !== 'symEN' && S.text[i] !== ' ') sp.className = 'en';
+    frag.appendChild(sp);
+  }
+  box.appendChild(frag);
+}
+
+function setMsg(text, kind) {
+  const m = $('msg');
+  m.textContent = text;
+  m.className = kind || '';
+}
+
+function update() {
+  const spans = $('text').children;
+  if (S.text && spans.length === S.text.length) {
+    for (let i = Math.max(0, S.pos - 2); i < Math.min(spans.length, S.pos + 2); i++) {
+      const sp = spans[i];
+      sp.classList.toggle('d', i < S.pos);
+      sp.classList.toggle('x', i < S.pos && S.errAt.has(i));
+      sp.classList.toggle('c', i === S.pos && !S.done);
+      sp.classList.toggle('bad', i === S.pos && S.posErr);
+    }
+  }
+  const L = S.text && S.pos < S.text.length ? S.layouts[S.pos] : (settings.lastLayout || 'RU');
+  renderKeyboard(L);
+  highlightNext();
+  renderLive();
+}
+
+function renderLive() {
+  const acc = S.keys ? Math.round(100 * S.correct / S.keys) : 100;
+  const el = S.startT && S.lastT > S.startT ? (S.lastT - S.startT) / 60000 : 0;
+  const wpm = el && S.pos >= 10 ? Math.round(S.pos / 5 / el) : '–';
+  $('live').textContent = `раскладка: ${settings.lastLayout} · ${wpm} wpm · ${acc}% · ${S.pos}/${S.text.length}`;
+}
+
+/* ---------- keyboard ---------- */
+let kbLayout = null, kbIso = null;
+function keyInner(code, L) {
+  if (code in SPECIAL_LABEL) return `<span class="lbl">${SPECIAL_LABEL[code]}</span>`;
+  const m = MAPS[L][code], o = MAPS[OTHER[L]][code];
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  let main;
+  if (isLetter(m[0])) main = `<span class="m one">${esc(m[1])}</span>`;
+  else main = `<span class="m"><span>${esc(m[1])}</span><span>${esc(m[0])}</span></span>`;
+  let alt = '';
+  if (o) {
+    if (isLetter(o[0])) alt = esc(o[1]);
+    else {
+      const parts = [];
+      if (o[1] !== m[1]) parts.push(esc(o[1]));
+      if (o[0] !== m[0]) parts.push(esc(o[0]));
+      alt = parts.map(p => `<span>${p}</span>`).join('');
+    }
+  }
+  return main + (alt ? `<span class="alt">${alt}</span>` : '');
+}
+function buildKeyboard() {
+  const kb = $('kb');
+  kb.textContent = '';
+  geometry(settings.iso).forEach(k => {
+    const el = document.createElement('div');
+    el.className = 'key f-' + FINGER[k.code];
+    el.dataset.code = k.code;
+    el.style.left = `calc(${k.x / 15 * 100}% + 2px)`;
+    el.style.top = `calc(${k.y / 5 * 100}% + 2px)`;
+    el.style.width = `calc(${k.w / 15 * 100}% - 4px)`;
+    el.style.height = `calc(${100 / 5}% - 4px)`;
+    kb.appendChild(el);
+  });
+  kbIso = settings.iso;
+  kbLayout = null;
+}
+function renderKeyboard(L) {
+  if (kbIso !== settings.iso) buildKeyboard();
+  if (kbLayout === L) return;
+  kbLayout = L;
+  for (const el of $('kb').children) el.innerHTML = keyInner(el.dataset.code, L);
+}
+
+// key + shift side needed to type ch in layout L
+function keyFor(ch, L) {
+  const k = REV[L][ch] || REV[OTHER[L]][ch];
+  if (!k) return null;
+  const lay = REV[L][ch] ? L : OTHER[L];
+  const f = FINGER[k.code];
+  return { code: k.code, shift: k.shift, finger: f, shiftSide: k.shift ? (f[0] === 'l' ? 'R' : 'L') : null, layout: lay };
+}
+function highlightNext() {
+  for (const el of $('kb').querySelectorAll('.next')) el.classList.remove('next');
+  const hint = $('hint');
+  if (S.done || !S.text || S.pos >= S.text.length) { hint.textContent = ''; return; }
+  const ch = S.text[S.pos], L = S.layouts[S.pos];
+  const k = keyFor(ch, L);
+  if (!k) { hint.textContent = ''; return; }
+  const mark = code => { const el = $('kb').querySelector(`[data-code="${code}"]`); if (el) el.classList.add('next'); };
+  mark(k.code);
+  if (k.shiftSide) mark(k.shiftSide === 'L' ? 'ShiftLeft' : 'ShiftRight');
+  const disp = c => c === ' ' ? 'пробел' : c;
+  const keyName = k.code === 'Space' ? 'пробел' : MAPS[k.layout][k.code][0];
+  const parts = [`${k.shift ? 'Shift + ' : ''}${keyName}`, FINGER_NAME[k.finger]];
+  if (k.shiftSide) parts.push(k.shiftSide === 'L' ? 'левый Shift' : 'правый Shift');
+  hint.innerHTML = '';
+  const b = document.createElement('b');
+  b.textContent = disp(ch);
+  hint.append(b, ' → ' + parts.join(' · ') + ` (раскладка ${k.layout})`);
+}
+
+/* ---------- input ---------- */
+const IGNORE_KEYS = new Set(['Shift', 'Control', 'Alt', 'AltGraph', 'Meta', 'OS', 'CapsLock', 'Fn', 'FnLock', 'Hyper', 'Super',
+  'Tab', 'Backspace', 'Delete', 'Escape', 'Enter', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End',
+  'PageUp', 'PageDown', 'Insert', 'ContextMenu', 'NumLock', 'ScrollLock', 'Unidentified', 'Process']);
+
+function isTextField(t) {
+  if (!t || !t.tagName) return false;
+  if (t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return true;
+  return t.tagName === 'INPUT' && t.type !== 'checkbox' && t.type !== 'radio';
+}
+
+function onKeyDown(e) {
+  if (e.code === 'ShiftLeft') shiftL = true;
+  if (e.code === 'ShiftRight') shiftR = true;
+  if (!e.shiftKey && e.key !== 'Shift') { shiftL = false; shiftR = false; }
+  if (tab !== 'train' || isTextField(e.target)) return;
+  if (e.metaKey || e.ctrlKey) return;
+  if (S.done) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startLesson(); }
+    return;
+  }
+  if (e.key === 'Escape') { e.preventDefault(); startLesson(); return; }
+  if (IGNORE_KEYS.has(e.key) || /^F\d+$/.test(e.key)) return;
+  if (e.key.length !== 1 && e.key !== 'Dead') return;
+  e.preventDefault();
+  if (e.repeat || !S.text || S.pos >= S.text.length) return;
+  handleChar(e);
+}
+function onKeyUp(e) {
+  if (e.code === 'ShiftLeft') shiftL = false;
+  if (e.code === 'ShiftRight') shiftR = false;
+}
+
+function wrongShift(e) {
+  if (!e.shiftKey || e.code === 'Space') return null;
+  const f = FINGER[e.code];
+  if (!f) return null;
+  const need = f[0] === 'l' ? 'R' : 'L';
+  const okDown = need === 'L' ? shiftL : shiftR;
+  const wrongDown = need === 'L' ? shiftR : shiftL;
+  return !okDown && wrongDown ? need : null;
+}
+
+function handleChar(e) {
+  const now = performance.now();
+  if (!S.startT) { S.startT = now; S.lastT = now; }
+  const exp = S.text[S.pos], L = S.layouts[S.pos];
+  const actual = detectLayout(e);
+  if (actual && actual !== settings.lastLayout) { settings.lastLayout = actual; saveSettings(); }
+  S.keys++;
+
+  if (e.altKey) return miss('Option не нужен: нажми клавишу без Option.', 'err');
+
+  if (e.key === exp) {
+    const need = wrongShift(e);
+    if (need) {
+      const txt = `Shift не той рукой: для «${exp}» нужен ${need === 'L' ? 'левый' : 'правый'} Shift.`;
+      if (settings.strict) {
+        if (!S.posShift) S.shiftErr++;
+        S.posShift = true;
+        return miss(txt, 'err');
+      }
+      S.shiftWarn++;
+      S.posShift = true;
+      setMsg(txt, 'warn');
+    } else {
+      setMsg('', '');
+    }
+    return advance(now, actual && actual !== L && (exp in REV[actual]) ? actual : L);
+  }
+
+  const caps = capsOn(e);
+  const isLayoutErr = charFor(L, e.code, e.shiftKey, caps) === exp ||
+    (L === 'RU' && isLat(e.key)) || (L === 'EN' && isCyr(e.key));
+  if (isLayoutErr) {
+    if (!S.posLayout) S.layoutErr++;
+    S.posLayout = true;
+    return miss(`Переключи раскладку (Ctrl+Space): нужна ${L}.`, 'err');
+  }
+  return miss('', '');
+}
+
+function miss(text, kind) {
+  S.errors++;
+  S.posErr = true;
+  S.errAt.add(S.pos);
+  setMsg(text, kind);
+  update();
+}
+
+function advance(now, statLayout) {
+  const ch = S.text[S.pos];
+  const st = statOf(statLayout, ch);
+  st.a++;
+  if (S.posErr) st.e++;
+  if (S.posLayout) st.le++;
+  if (S.posShift) st.se++;
+  const dt = now - S.lastT;
+  if (S.pos > 0 && dt > 0 && dt <= 2000) { st.t += dt; st.n++; }
+  S.lastT = now;
+  S.correct++;
+  S.pos++;
+  S.posErr = S.posLayout = S.posShift = false;
+  if (++S.sinceSave >= 25) { S.sinceSave = 0; saveStats(); }
+  if (S.pos >= S.text.length) return finish();
+  update();
+}
+
+function finish() {
+  S.done = true;
+  const min = Math.max(1e-6, (S.lastT - S.startT) / 60000);
+  const wpm = Math.round(S.text.length / 5 / min);
+  const acc = S.keys ? Math.round(1000 * S.correct / S.keys) / 10 : 100;
+  history.push({
+    t: Date.now(), mode: S.mode, chars: S.text.length, wpm, acc,
+    errors: S.errors, layoutErr: S.layoutErr, shiftErr: S.shiftErr, shiftWarn: S.shiftWarn
+  });
+  if (history.length > 50) history = history.slice(-50);
+  saveStats();
+  update();
+  $('text').classList.add('hidden');
+  const r = $('result');
+  r.classList.remove('hidden');
+  r.innerHTML = `
+    <div class="grid">
+      <div><div class="big">${wpm}</div><span>wpm</span></div>
+      <div><div class="big">${String(acc).replace('.', ',')}%</div><span>точность</span></div>
+      <div><div class="big">${S.errors}</div><span>ошибок всего</span></div>
+      <div><div class="big">${S.layoutErr}</div><span>ошибок раскладки</span></div>
+      <div><div class="big">${S.shiftErr}</div><span>ошибок Shift${S.shiftWarn ? ` (+${S.shiftWarn} предупр.)` : ''}</span></div>
+    </div>
+    <button class="primary" id="againBtn">Ещё</button>
+    <div class="muted small" style="margin-top:6px">Enter или пробел — следующий урок</div>`;
+  $('againBtn').onclick = () => startLesson();
+  setMsg('', '');
+}
+
+/* ---------- mode options ---------- */
+function renderModeOpts() {
+  const box = $('modeOpts');
+  box.textContent = '';
+  const m = settings.mode;
+  if (m === 'symRU' || m === 'symEN') {
+    const L = m === 'symRU' ? 'RU' : 'EN', key = 'sym' + L;
+    const d = document.createElement('details');
+    d.innerHTML = `<summary>Знаки ${L} (галочки)</summary>`;
+    const wrap = document.createElement('div');
+    wrap.className = 'syms';
+    SYM_TOGGLES[L].forEach(t => {
+      const lab = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!settings[key][t];
+      cb.onchange = () => { settings[key][t] = cb.checked; saveSettings(); cb.blur(); startLesson(); };
+      lab.append(cb, t === '0-9' ? 'цифры' : t.split('').join(' '));
+      wrap.appendChild(lab);
+    });
+    d.appendChild(wrap);
+    box.appendChild(d);
+  } else if (m === 'custom') {
+    const c = store.get(K_CUSTOM, { text: '', offset: 0 });
+    const ta = document.createElement('textarea');
+    ta.id = 'customText';
+    ta.placeholder = 'Вставь сюда любой текст. Длинный текст пойдёт кусками по ~300 знаков.';
+    ta.value = c.text || '';
+    const btn = document.createElement('button');
+    btn.className = 'primary';
+    btn.textContent = 'Начать';
+    btn.onclick = () => { store.set(K_CUSTOM, { text: ta.value, offset: 0 }); btn.blur(); startLesson(); };
+    const note = document.createElement('div');
+    note.className = 'muted small';
+    note.textContent = '«Ёлочки» и “лапки” заменяются на ", длинное тире — на -, символы, которых нет на клавиатуре, пропускаются.';
+    const row = document.createElement('div');
+    row.className = 'row';
+    row.style.marginTop = '6px';
+    row.append(btn, note);
+    box.append(ta, row);
+  }
+}
+
+function setMode(m) {
+  settings.mode = m;
+  saveSettings();
+  for (const b of $('modes').children) b.setAttribute('aria-pressed', String(b.dataset.mode === m));
+  renderModeOpts();
+  startLesson();
+}
+
+/* ---------- stats tab ---------- */
+function renderStats() {
+  const fL = $('stLayout').value, noLetters = $('stNoLetters').checked;
+  const g = globalAvgTime();
+  const rows = Object.keys(stats).map(k => {
+    const s = stats[k], L = k.slice(0, 2), ch = k.slice(3);
+    return { L, ch, s, er: s.a ? s.e / s.a : 0, avg: s.n ? s.t / s.n : null };
+  }).filter(r => r.s.a > 0 && (!fL || r.L === fL) && (!noLetters || (!isLetter(r.ch) && r.ch !== ' ')));
+  rows.forEach(r => { r.score = r.er * 4 + (r.avg != null ? r.avg : g) / 1000; });
+  rows.sort((a, b) => b.score - a.score);
+  const t = $('stTable');
+  if (!rows.length) { t.innerHTML = '<tr><td class="muted">Пока пусто — пройди урок.</td></tr>'; }
+  else {
+    t.innerHTML = '<tr><th>Символ</th><th>Раскл.</th><th>Как нажать</th><th>Попыток</th><th>Ошибок</th><th>Раскладка</th><th>Shift</th><th>Ср. время</th></tr>';
+    rows.forEach(r => {
+      const tr = document.createElement('tr');
+      const avg = r.avg;
+      tr.className = r.er >= 0.15 || (avg && avg >= 1000) ? 'bad' : r.er >= 0.05 || (avg && avg >= 600) ? 'mid' : 'good';
+      const k = keyFor(r.ch, r.L);
+      const how = k ? (k.shift ? 'Shift + ' : '') + (k.code === 'Space' ? 'пробел' : MAPS[k.layout][k.code][0]) + (k.shiftSide ? (k.shiftSide === 'L' ? ' (левый Shift)' : ' (правый Shift)') : '') : '';
+      const cells = [r.ch === ' ' ? '␣' : r.ch, r.L, how, r.s.a, `${r.s.e} (${Math.round(r.er * 100)}%)`, r.s.le, r.s.se,
+        avg != null ? Math.round(avg) + ' мс' : '—'];
+      cells.forEach((c, i) => { const td = document.createElement('td'); td.textContent = c; if (i === 0) td.className = 'ch'; tr.appendChild(td); });
+      t.appendChild(tr);
+    });
+  }
+  const h = $('histTable');
+  if (!history.length) h.innerHTML = '<tr><td class="muted">Пока нет уроков.</td></tr>';
+  else {
+    const MODE_NAME = { digits: 'Цифры', symRU: 'Знаки RU', symEN: 'Знаки EN', mixed: 'Смешанный', custom: 'Свой текст' };
+    h.innerHTML = '<tr><th>Когда</th><th>Режим</th><th>Знаков</th><th>wpm</th><th>Точность</th><th>Ошибок</th><th>Раскладка</th><th>Shift</th></tr>';
+    history.slice().reverse().forEach(x => {
+      const tr = document.createElement('tr');
+      const d = new Date(x.t);
+      const when = `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+      [when, MODE_NAME[x.mode] || x.mode, x.chars, x.wpm, String(x.acc).replace('.', ',') + '%', x.errors, x.layoutErr,
+        x.shiftErr + (x.shiftWarn ? ` (+${x.shiftWarn})` : '')].forEach(c => {
+        const td = document.createElement('td'); td.textContent = c; tr.appendChild(td);
+      });
+      h.appendChild(tr);
+    });
+  }
+  renderReset(false);
+}
+function renderReset(confirming) {
+  const box = $('resetBox');
+  box.textContent = '';
+  if (!confirming) {
+    const b = document.createElement('button');
+    b.textContent = 'Сбросить статистику';
+    b.onclick = () => renderReset(true);
+    box.appendChild(b);
+    return;
+  }
+  const wrap = document.createElement('span');
+  wrap.className = 'confirm';
+  const yes = document.createElement('button');
+  yes.className = 'primary';
+  yes.textContent = 'Да, удалить всё';
+  yes.onclick = () => { stats = {}; history = []; store.del(K_STATS); store.del(K_HIST); renderStats(); };
+  const no = document.createElement('button');
+  no.textContent = 'Отмена';
+  no.onclick = () => renderReset(false);
+  wrap.append('Точно? Статистика и история уроков удалятся без возврата.', yes, no);
+  box.appendChild(wrap);
+}
+
+/* ---------- tabs & init ---------- */
+function setTab(t) {
+  tab = t;
+  for (const b of $('tabs').children) b.setAttribute('aria-pressed', String(b.dataset.tab === t));
+  ['train', 'stats', 'settings'].forEach(x => $('tab-' + x).classList.toggle('hidden', x !== t));
+  if (t === 'stats') renderStats();
+}
+
+function init() {
+  $('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { setTab(b.dataset.tab); b.blur(); } });
+  $('modes').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { setMode(b.dataset.mode); b.blur(); } });
+  $('newBtn').onclick = e => { e.currentTarget.blur(); startLesson(); };
+  $('stLayout').onchange = renderStats;
+  $('stNoLetters').onchange = renderStats;
+  $('optStrict').checked = settings.strict;
+  $('optStrict').onchange = e => { settings.strict = e.target.checked; saveSettings(); };
+  $('optIso').checked = settings.iso;
+  $('optIso').onchange = e => { settings.iso = e.target.checked; saveSettings(); buildKeyboard(); update(); };
+  $('optDigitsLayout').value = settings.digitsLayout;
+  $('optDigitsLayout').onchange = e => { settings.digitsLayout = e.target.value; saveSettings(); if (settings.mode === 'digits') startLesson(); };
+  if (!store.works()) $('storageNote').textContent = 'localStorage недоступен: статистика и настройки не сохранятся после закрытия страницы.';
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('blur', () => { shiftL = shiftR = false; });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) saveStats(); });
+  window.addEventListener('pagehide', saveStats);
+  buildKeyboard();
+  setMode(settings.mode);
+}
+init();
+
+// hooks for automated tests
+window.__tt = {
+  get state() { return S; }, get settings() { return settings; }, get stats() { return stats; },
+  load: text => startLesson(text), generate, typeable, assignLayouts
+};
+</script>
+</body>
+</html>
