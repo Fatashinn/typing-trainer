@@ -46,6 +46,8 @@
   --flash-ok: rgba(0, 0, 0, .3);
   --flash-bad: #e53935;
   --flash-warn: #f2c200;
+  --rep-bg: #ece5fb;
+  --fast: #d9730d;
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -89,6 +91,8 @@
     --flash-ok: rgba(0, 0, 0, .45);
     --flash-bad: #ff5a52;
     --flash-warn: #ffd23f;
+    --rep-bg: #3a3152;
+    --fast: #f0a050;
   }
 }
 * { box-sizing: border-box; }
@@ -132,6 +136,8 @@ textarea { width: 100%; min-height: 90px; background: var(--bg); border: 1px sol
 }
 #text { white-space: pre-wrap; overflow-wrap: break-word; }
 #text span.d { color: var(--done); }
+#text span.rep { background: var(--rep-bg); }
+#text span.fast { color: var(--fast); }
 #text span.d.x { color: var(--err); }
 #text span.c { background: var(--cur-bg); border-bottom: 2px solid var(--accent); }
 #text span.c.bad { background: var(--err-bg); border-bottom-color: var(--err); }
@@ -145,6 +151,17 @@ textarea { width: 100%; min-height: 90px; background: var(--bg); border: 1px sol
 #msg.err { background: var(--err-bg); color: var(--err); }
 #msg.warn { background: var(--warn-bg); color: var(--warn); }
 #live { margin-left: auto; color: var(--muted); }
+
+/* daily training */
+#dailyRow { margin-bottom: 8px; }
+#streak b { color: var(--fg); }
+#streak .miss { color: var(--warn); }
+#dailyBar { margin-top: 10px; padding: 8px 12px; font-size: 14px; }
+#dailyBar .bar { height: 6px; border-radius: 3px; background: var(--border); margin-top: 6px; overflow: hidden; }
+#dailyBar .bar div { height: 100%; background: var(--accent); }
+#dailyBar .t { font-variant-numeric: tabular-nums; font-weight: 600; }
+.densRow { margin-top: 6px; }
+.densRow input { vertical-align: middle; }
 
 /* keyboard */
 #kbWrap { margin-top: 10px; container-type: inline-size; }
@@ -232,9 +249,14 @@ h2:first-child { margin-top: 0; }
   </header>
 
   <section id="tab-train">
+    <div class="row" id="dailyRow">
+      <button class="primary" id="dailyBtn">Тренировка дня</button>
+      <span id="streak" class="muted small"></span>
+    </div>
     <div class="row">
       <div class="seg" id="modes">
         <button data-mode="digits">Цифры</button>
+        <button data-mode="weak">Слабые места</button>
         <button data-mode="symRU">Знаки RU</button>
         <button data-mode="symEN">Знаки EN</button>
         <button data-mode="mixed">Смешанный</button>
@@ -257,6 +279,7 @@ h2:first-child { margin-top: 0; }
       </div>
     </div>
     <div id="modeOpts"></div>
+    <div class="panel hidden" id="dailyBar"></div>
     <div class="panel" id="textBox">
       <div id="text"></div>
       <div id="result" class="hidden"></div>
@@ -297,6 +320,13 @@ h2:first-child { margin-top: 0; }
       <label><span><b>Раскладка в режиме «Цифры»</b>
         <select id="optDigitsLayout"><option value="RU">RU</option><option value="EN">EN</option></select><br>
         <span class="muted small">Влияет на подсказку и статистику. Знаки, общие для обеих раскладок, принимаются из любой.</span></span></label>
+      <label><span><b>Потолок скорости</b>
+        <select id="optCeiling"><option value="0">выкл</option><option>40</option><option>45</option><option>50</option>
+          <option>55</option><option>60</option><option>65</option><option>70</option><option>75</option><option>80</option></select> wpm<br>
+        <span class="muted small">Скорость считается по каждому слову. Слово быстрее потолка подсвечивается оранжевым и не входит в wpm урока: так видно, где гонишь в ущерб точности.</span></span></label>
+      <label><span><b>Перепечатать слово с ошибкой</b>
+        <select id="optRetype"><option value="0">выкл</option><option value="2">2 раза</option><option value="3">3 раза</option></select><br>
+        <span class="muted small">После слова с ошибкой оно вставляется в текст ещё N раз подряд (выделено фоном).</span></span></label>
       <p class="muted small" id="storageNote"></p>
     </div>
   </section>
@@ -330,6 +360,7 @@ const store = {
   }
 };
 const K_SETTINGS = 'tt.settings', K_STATS = 'tt.stats', K_HIST = 'tt.history', K_CUSTOM = 'tt.custom', K_TOTALS = 'tt.totals';
+const K_DAYS = 'tt.days', K_DAILY = 'tt.daily';
 
 /* ---------- layouts ---------- */
 const EN = {
@@ -547,13 +578,17 @@ const SYM_TOGGLES = {
 const toggleChars = t => t === '0-9' ? '0123456789'.split('') : t.length === 2 && t !== '0-9' ? t.split('') : [t];
 
 /* ---------- settings / stats ---------- */
+const pad2 = n => String(n).padStart(2, '0');
 const defaults = {
   mode: 'symRU', strict: true, iso: false, digitsLayout: 'RU', lastLayout: 'RU',
   symRU: Object.fromEntries(SYM_TOGGLES.RU.map(t => [t, true])),
   symEN: Object.fromEntries(SYM_TOGGLES.EN.map(t => [t, true])),
   // per training mode: hint level and how the on-screen keyboard looks
-  hint: { digits: 'demand', symRU: 'demand', symEN: 'demand', mixed: 'demand', custom: 'demand' },
-  kbView: { digits: 'labels', symRU: 'labels', symEN: 'labels', mixed: 'labels', custom: 'labels' }
+  hint: { digits: 'demand', weak: 'demand', symRU: 'demand', symEN: 'demand', mixed: 'demand', custom: 'demand' },
+  kbView: { digits: 'labels', weak: 'labels', symRU: 'labels', symEN: 'labels', mixed: 'labels', custom: 'labels' },
+  density: 2,   // a symbol roughly in every N-th word (1..4)
+  ceiling: 0,   // speed ceiling in wpm, 0 = off
+  retype: 2     // retype a word with an error N more times, 0 = off
 };
 const settings = Object.assign({}, defaults, store.get(K_SETTINGS, {}));
 settings.symRU = Object.assign({}, defaults.symRU, settings.symRU);
@@ -570,7 +605,13 @@ let history = store.get(K_HIST, []);
 const lessonMs = x => x.ms != null ? x.ms : (x.wpm ? x.chars / 5 / x.wpm * 60000 : 0);
 let totals = store.get(K_TOTALS, null) ||
   { lessons: history.length, ms: Math.round(history.reduce((a, x) => a + lessonMs(x), 0)) };
-const saveStats = () => { store.set(K_STATS, stats); store.set(K_HIST, history); store.set(K_TOTALS, totals); };
+// training time per local day, ms: { '2026-10-29': 754000 }
+const dayKey = t => { const d = new Date(t); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+let days = store.get(K_DAYS, null);
+if (!days) { days = {}; history.forEach(x => { const k = dayKey(x.t); days[k] = (days[k] || 0) + lessonMs(x); }); }
+const saveStats = () => {
+  store.set(K_STATS, stats); store.set(K_HIST, history); store.set(K_TOTALS, totals); store.set(K_DAYS, days);
+};
 
 function statOf(L, ch) {
   const k = L + '|' + ch;
@@ -600,7 +641,6 @@ function pickWeighted(items, weights) {
   for (let i = 0; i < items.length; i++) { r -= weights[i]; if (r <= 0) return items[i]; }
   return items[items.length - 1];
 }
-const pad2 = n => String(n).padStart(2, '0');
 function capFirst(s) {
   for (let i = 0; i < s.length; i++) {
     if (isLetter(s[i])) return s.slice(0, i) + s[i].toUpperCase() + s.slice(i + 1);
@@ -668,7 +708,7 @@ function symbolTemplates(L) {
     tp('*', () => '*' + w() + '*'), tp('* 0-9', () => rint(2, 9) + ' * ' + rint(2, 9)),
     tp('/', () => w() + '/' + w()), tp('/ 0-9', () => rint(1, 9) + '/' + rint(2, 9)),
     tp('\\', () => w() + '\\' + w()),
-    tp('.', () => w() + '...'),
+    tp(',', () => w() + ','), tp(':', () => w() + ':'), tp('-', () => pick(['10-15', '5-7', '2-3'])),
     tp('0-9', () => String(rint(2, 2030))), tp('. 0-9', () => pad2(rint(1, 28)) + '.' + pad2(rint(1, 12))),
     tp(': 0-9', () => rint(8, 22) + ':' + pick(['00', '15', '30', '45']))
   ];
@@ -679,7 +719,7 @@ function symbolTemplates(L) {
   }
   return common.concat([
     tp("'", () => pick(EN_CONTRACTIONS)), tp("'", () => pick(EN_CONTRACTIONS)), tp("'", () => "'" + w() + "'"),
-    tp('@', () => w() + '@' + w() + '.com'), tp('@', () => '@' + w()),
+    tp('@ .', () => w() + '@' + w() + '.com'), tp('@', () => '@' + w()),
     tp('# 0-9', () => '#' + n()), tp('$ 0-9', () => '$' + n()),
     tp('&', () => w() + ' & ' + w()),
     tp('[]', () => '[' + w() + ']'), tp('{}', () => '{' + w() + '}'), tp('<>', () => '<' + w() + '>'),
@@ -688,24 +728,131 @@ function symbolTemplates(L) {
   ]);
 }
 
-function genSymbols(L) {
-  const en = settings['sym' + L], g = globalAvgTime();
-  const tmplW = t => Math.max(...t.t.map(tg => { const cs = toggleChars(tg); return cs.reduce((a, c) => a + weakness(L, c, g), 0) / cs.length; }));
-  const tpls = symbolTemplates(L).filter(t => t.t.every(tg => en[tg]));
-  const tw = tpls.map(tmplW);
-  const terms = [];
-  if (en['.']) terms.push(['.', weakness(L, '.', g)], ['...', 0.3]);
-  if (en['!']) terms.push(['!', weakness(L, '!', g)]);
-  if (en['?']) terms.push(['?', weakness(L, '?', g)]);
-  if (en['!'] && en['?']) terms.push(['?!', 0.3]);
+const TERM_TOGGLES = ['.', '!', '?'];
+// one lesson of sentences: first word plain, then a symbol template in about every N-th word;
+// toggles not yet seen in the lesson are preferred until each one has appeared
+function buildSymLesson(L, en, enabled) {
+  const g = globalAvgTime();
   const W = L === 'RU' ? WORDS_RU : WORDS_EN;
-  return fillLesson(() => {
-    const parts = [], len = rint(3, 6);
-    for (let i = 0; i < len; i++) parts.push(tpls.length && Math.random() < 0.6 ? pickWeighted(tpls, tw).f() : pick(W));
+  const dens = Math.min(4, Math.max(1, +settings.density || 2));
+  const tpls = symbolTemplates(L).filter(t => t.t.every(tg => en[tg]));
+  const wOf = tg => { const cs = toggleChars(tg); return cs.reduce((a, c) => a + weakness(L, c, g), 0) / cs.length; };
+  const tw = tpls.map(t => Math.max(...t.t.map(wOf)));
+  const need = new Set(enabled.filter(t => !TERM_TOGGLES.includes(t) && tpls.some(x => x.t.includes(t))));
+  const terms = TERM_TOGGLES.filter(t => en[t]);
+  const needTerms = new Set(terms);
+  const sentences = [];
+  let len = 0;
+  for (let guard = 0; guard < 40; guard++) {
+    const parts = [pick(W)];
+    const n = rint(4, 8);
+    for (let i = 1; i < n; i++) {
+      const slotsLeft = Math.max(1, (MAX_LEN - 20 - len - parts.join(' ').length) / 8);
+      const p = Math.max(1 / dens, Math.min(1, need.size / slotsLeft));
+      if (tpls.length && Math.random() < p) {
+        let idx = tpls.map((t, k) => k);
+        if (need.size) { const c = idx.filter(k => tpls[k].t.some(tg => need.has(tg))); if (c.length) idx = c; }
+        const k = pickWeighted(idx, idx.map(k => tw[k]));
+        parts.push(tpls[k].f());
+        tpls[k].t.forEach(tg => need.delete(tg));
+      } else parts.push(pick(W));
+    }
+    // "word," / "word:" can't close a sentence ("team,!")
+    if (/[,:;]$/.test(parts[parts.length - 1])) parts.push(pick(W));
     let s = parts.join(' ');
-    if (terms.length) s = capFirst(s + pickWeighted(terms.map(t => t[0]), terms.map(t => t[1])));
-    return s;
+    if (terms.length) {
+      // mostly a single full stop; "!" and "?" are forced in if still missing; "..." is rare
+      const sentencesLeft = Math.max(1, Math.round((MAX_LEN - len) / 45));
+      const pending = [...needTerms];
+      let term = pending.length && Math.random() < pending.length / sentencesLeft ? pick(pending)
+        : pickWeighted(terms, terms.map(t => (t === '.' ? 6 : 1) * weakness(L, t, g)));
+      needTerms.delete(term);
+      if (term === '.' && Math.random() < 0.05) term = '...';
+      s = capFirst(s + term);
+    }
+    sentences.push(s);
+    len += s.length + 1;
+    if (len >= MIN_LEN + 30 && !need.size && !needTerms.size) break;
+    if (len > MAX_LEN) break;
+  }
+  return sentences.join(' ');
+}
+// every enabled toggle occurs, single "." counts apart from "...", no sign doubled ("!!", ",,")
+function symLessonOk(t, enabled) {
+  const noEll = t.replace(/\.\.\./g, '');
+  if (/\.{4,}/.test(t) || /([^\p{L}\p{N}\s])\1/u.test(noEll) || /[,:;][.!?]/.test(t)) return false;
+  return enabled.every(tg => tg === '0-9' ? /[0-9]/.test(t) : toggleChars(tg).every(c => (tg === '.' ? noEll : t).includes(c)));
+}
+function genSymbols(L) {
+  const en = settings['sym' + L];
+  const enabled = SYM_TOGGLES[L].filter(t => en[t]);
+  let best = null;
+  for (let i = 0; i < 80; i++) {
+    const t = buildSymLesson(L, en, enabled);
+    if (!symLessonOk(t, enabled)) continue;
+    if (t.length >= MIN_LEN && t.length <= MAX_LEN) return t;
+    if (t.length <= MAX_LEN && (!best || t.length > best.length)) best = t;
+  }
+  return best || buildSymLesson(L, en, enabled);
+}
+
+/* ---------- weak spots ---------- */
+const VOWELS = { RU: 'аоеиуыя', EN: 'aeiou' };
+// 5-6 worst symbols/digits (>= 5 attempts) in the layout where they are worse, plus frequent confusions
+function weakInfo() {
+  const g = globalAvgTime();
+  const per = {};
+  ['RU', 'EN'].forEach(L => {
+    per[L] = Object.keys(stats).filter(k => k.startsWith(L + '|')).map(k => ({ ch: k.slice(3), s: stats[k] }))
+      .filter(r => r.s.a >= 5 && !isLetter(r.ch) && r.ch !== ' ')
+      .map(r => Object.assign(r, { score: (r.s.e / r.s.a) * 4 + (r.s.n ? r.s.t / r.s.n : g) / 1000 }))
+      .sort((a, b) => b.score - a.score).slice(0, 6);
   });
+  const sum = L => per[L].reduce((a, r) => a + r.score, 0);
+  const L = per.EN.length >= 5 && (per.RU.length < 5 || sum('EN') > sum('RU')) ? 'EN' : 'RU';
+  if (per[L].length < 5) return { L: null, chars: [], pairs: [] };
+  const pairs = [];
+  Object.keys(stats).filter(k => k.startsWith(L + '|') && stats[k].x).forEach(k => {
+    const x = stats[k].x;
+    Object.keys(x).forEach(p => { if (x[p] >= 2 && k.slice(3) !== ' ') pairs.push({ e: k.slice(3), p, n: x[p] }); });
+  });
+  pairs.sort((a, b) => b.n - a.n);
+  return { L, chars: per[L], pairs: pairs.slice(0, 4) };
+}
+let weakState = { L: null, chars: [], pairs: [] };
+function genWeak() {
+  weakState = weakInfo();
+  const { L, chars, pairs } = weakState;
+  if (!L) return '';
+  const W = L === 'RU' ? WORDS_RU : WORDS_EN;
+  const tpls = symbolTemplates(L);
+  const w = () => pick(W);
+  const chunkFor = c => {
+    if (/[0-9]/.test(c)) { let s = c; const n = rint(2, 3); for (let i = 0; i < n; i++) s += Math.random() < 0.5 ? c : rnd(10); return s; }
+    if ('.!?'.includes(c)) return w() + c;
+    const ts = tpls.filter(t => t.t.some(tg => toggleChars(tg).includes(c)));
+    const t = ts.length ? pick(ts).f() : w() + c;
+    return t.includes(c) ? t : w() + c;
+  };
+  const drillFor = pr => {
+    const e = pr.e;
+    if (!isLetter(e)) return chunkFor(e);
+    const low = e.toLowerCase(), ws = W.filter(x => x.includes(low));
+    const syl = Math.random() < 0.5 ? low + pick(VOWELS[L]) : pick(VOWELS[L]) + low;
+    let out = ws.length && Math.random() < 0.7 ? pick(ws) : syl;
+    if (e !== low) out = out[0].toUpperCase() + out.slice(1);
+    return out;
+  };
+  const queue = chars.map(r => r.ch).sort(() => Math.random() - 0.5);
+  const text = fillLesson(() => {
+    if (queue.length) return chunkFor(queue.shift());
+    const r = Math.random();
+    if (pairs.length && r < 0.3) return drillFor(pick(pairs));
+    if (r < 0.4) return w();
+    return chunkFor(pickWeighted(chars.map(x => x.ch), chars.map(x => x.score)));
+  });
+  // capital letter after a sentence end
+  return capFirst(text.replace(/([.!?] )(\S)/g, (m, a, b) => a + capFirst(b)));
 }
 
 function genMixed() {
@@ -738,6 +885,7 @@ function genCustom() {
 
 function generate(mode) {
   if (mode === 'digits') return genDigits();
+  if (mode === 'weak') return genWeak();
   if (mode === 'symRU') return genSymbols('RU');
   if (mode === 'symEN') return genSymbols('EN');
   if (mode === 'mixed') return genMixed();
@@ -745,6 +893,7 @@ function generate(mode) {
 }
 function fallbackLayout(mode) {
   if (mode === 'digits') return settings.digitsLayout;
+  if (mode === 'weak') return weakState.L || 'RU';
   if (mode === 'symEN') return 'EN';
   if (mode === 'symRU' || mode === 'mixed') return 'RU';
   return settings.lastLayout || 'RU';
@@ -775,8 +924,11 @@ function startLesson(text) {
     mode: settings.mode, text, layouts: assignLayouts(text, fallbackLayout(settings.mode)),
     pos: 0, startT: 0, lastT: 0, done: false,
     keys: 0, correct: 0, errors: 0, layoutErr: 0, shiftErr: 0, shiftWarn: 0,
-    posErr: false, posLayout: false, posShift: false, errAt: new Set(), sinceSave: 0
+    posErr: false, posLayout: false, posShift: false, errAt: new Set(), sinceSave: 0,
+    // words: start of the current word, its error flag; repeats and too-fast words by char index
+    wStartPos: 0, wStartT: 0, wordErr: false, rep: new Set(), fast: new Set(), fastWords: 0, fastChars: 0, fastMs: 0
   };
+  S.mixedLayouts = S.layouts.includes('RU') && S.layouts.includes('EN');
   $('result').classList.add('hidden');
   $('text').classList.remove('hidden');
   renderText();
@@ -789,6 +941,16 @@ function renderText() {
   const box = $('text');
   box.textContent = '';
   if (!S.text) {
+    if (S.mode === 'weak') {
+      box.innerHTML = '<div class="muted" style="font-size:16px">Мало данных, сначала пройди другие режимы: нужно хотя бы 5 знаков, на каждом от 5 попыток.</div>';
+      const b = document.createElement('button');
+      b.className = 'primary';
+      b.style.marginTop = '10px';
+      b.textContent = 'Перейти в «Цифры»';
+      b.onclick = () => { b.blur(); stopDaily(); setMode('digits'); };
+      box.appendChild(b);
+      return;
+    }
     box.innerHTML = '<span class="muted" style="font-size:16px">' +
       (S.mode === 'custom' ? 'Вставь текст в поле выше и нажми «Начать».' : 'Нет текста: включи хотя бы один знак.') + '</span>';
     return;
@@ -797,7 +959,13 @@ function renderText() {
   for (let i = 0; i < S.text.length; i++) {
     const sp = document.createElement('span');
     sp.textContent = S.text[i];
-    if (S.layouts[i] === 'EN' && S.mode !== 'symEN' && S.text[i] !== ' ') sp.className = 'en';
+    const cls = [];
+    if (S.layouts[i] === 'EN' && S.mixedLayouts && S.text[i] !== ' ') cls.push('en');
+    if (S.rep.has(i)) cls.push('rep');
+    if (S.fast.has(i)) cls.push('fast');
+    if (i < S.pos) cls.push('d');
+    if (i < S.pos && S.errAt.has(i)) cls.push('x');
+    if (cls.length) sp.className = cls.join(' ');
     frag.appendChild(sp);
   }
   box.appendChild(frag);
@@ -967,7 +1135,7 @@ function isTextField(t) {
   if (!t || !t.tagName) return false;
   if (t.tagName === 'SELECT') return !t.dataset.quick;
   if (t.tagName === 'TEXTAREA') return true;
-  return t.tagName === 'INPUT' && t.type !== 'checkbox' && t.type !== 'radio';
+  return t.tagName === 'INPUT' && !['checkbox', 'radio', 'range'].includes(t.type);
 }
 
 function onKeyDown(e) {
@@ -978,7 +1146,7 @@ function onKeyDown(e) {
   if (tab !== 'train' || isTextField(e.target)) return;
   if (e.metaKey || e.ctrlKey) return;
   if (S.done) {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); startLesson(); }
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); (S.onContinue || (() => startLesson()))(); }
     return;
   }
   if (e.key === 'Escape') { e.preventDefault(); startLesson(); return; }
@@ -1069,6 +1237,7 @@ function miss(text, kind) {
   S.errors++;
   S.posErr = true;
   S.errAt.add(S.pos);
+  S.wordErr = true;
   S.reveal = true;
   clearTimeout(revealTimer);
   setMsg(text, kind);
@@ -1077,6 +1246,7 @@ function miss(text, kind) {
 
 function advance(now, statLayout) {
   const ch = S.text[S.pos];
+  if (ch !== ' ' && (S.pos === 0 || S.text[S.pos - 1] === ' ')) { S.wStartPos = S.pos; S.wStartT = S.pos === 0 ? now : S.lastT; }
   const st = statOf(statLayout, ch);
   st.a++;
   if (S.posErr) st.e++;
@@ -1088,25 +1258,80 @@ function advance(now, statLayout) {
   S.correct++;
   S.pos++;
   S.posErr = S.posLayout = S.posShift = false;
+  if (ch === ' ') S.wordErr = false;
+  else if (S.pos >= S.text.length || S.text[S.pos] === ' ') wordDone(now);
   if (++S.sinceSave >= 25) { S.sinceSave = 0; saveStats(); }
   if (S.pos >= S.text.length) return finish();
   armReveal();
   update();
 }
 
-function finish() {
-  S.done = true;
-  const min = Math.max(1e-6, (S.lastT - S.startT) / 60000);
-  const wpm = Math.round(S.text.length / 5 / min);
+// a word is complete: check it against the speed ceiling, queue repeats if it had an error
+function wordDone(now) {
+  const start = S.wStartPos, end = S.pos;
+  let changed = false;
+  const chars = start === 0 ? end - start - 1 : end - start;
+  const dur = now - S.wStartT;
+  const ceil = +settings.ceiling || 0;
+  if (ceil && chars > 0 && dur > 0 && chars / 5 / (dur / 60000) > ceil) {
+    for (let i = start; i < end; i++) S.fast.add(i);
+    S.fastWords++; S.fastChars += chars; S.fastMs += dur;
+    changed = true;
+  }
+  const n = +settings.retype || 0;
+  if (n && S.wordErr && !S.rep.has(start)) {
+    const word = S.text.slice(start, end);
+    const lays = [S.layouts[end - 1], ...S.layouts.slice(start, end)];
+    let ins = '', insL = [];
+    for (let k = 0; k < n; k++) { ins += ' ' + word; insL = insL.concat(lays); }
+    const shift = set => new Set([...set].map(i => i >= end ? i + ins.length : i));
+    S.errAt = shift(S.errAt); S.fast = shift(S.fast); S.rep = shift(S.rep);
+    S.text = S.text.slice(0, end) + ins + S.text.slice(end);
+    S.layouts.splice(end, 0, ...insL);
+    for (let k = 0; k < ins.length; k++) if (ins[k] !== ' ') S.rep.add(end + k);
+    changed = true;
+  }
+  if (changed) renderText();
+}
+
+// "..." apart from the single ".", digits together: {".": 9, "...": 1, ",": 4, "0-9": 12}
+function countSyms(text) {
+  const cnt = {};
+  const ell = (text.match(/\.\.\./g) || []).length;
+  if (ell) cnt['...'] = ell;
+  for (const c of text.replace(/\.\.\./g, '')) {
+    if (isLetter(c) || c === ' ') continue;
+    const k = /[0-9]/.test(c) ? '0-9' : c;
+    cnt[k] = (cnt[k] || 0) + 1;
+  }
+  return cnt;
+}
+
+// store the lesson (also a partly typed one when a daily block runs out of time)
+function recordLesson() {
+  const ms = Math.max(0, Math.round(S.lastT - S.startT));
+  const effChars = S.pos - S.fastChars, effMs = ms - S.fastMs;
+  const wpm = effChars > 0 && effMs > 0 ? Math.round(effChars / 5 / (effMs / 60000)) : 0;
   const acc = S.keys ? Math.round(1000 * S.correct / S.keys) / 10 : 100;
   history.push({
-    t: Date.now(), mode: S.mode, chars: S.text.length, wpm, acc, ms: Math.round(S.lastT - S.startT),
-    errors: S.errors, layoutErr: S.layoutErr, shiftErr: S.shiftErr, shiftWarn: S.shiftWarn
+    t: Date.now(), mode: S.mode, chars: S.pos, wpm, acc, ms,
+    errors: S.errors, layoutErr: S.layoutErr, shiftErr: S.shiftErr, shiftWarn: S.shiftWarn,
+    fast: S.fastWords, cnt: countSyms(S.text.slice(0, S.pos))
   });
   if (history.length > 50) history = history.slice(-50);
   totals.lessons++;
-  totals.ms += Math.round(S.lastT - S.startT);
+  totals.ms += ms;
+  const dk = dayKey(Date.now());
+  days[dk] = (days[dk] || 0) + ms;
+  if (daily && !daily.waiting) daily.blockMs += ms;
   saveStats();
+  renderStreak();
+  return { wpm, acc };
+}
+
+function finish() {
+  S.done = true;
+  const { wpm, acc } = recordLesson();
   update();
   $('text').classList.add('hidden');
   const r = $('result');
@@ -1118,11 +1343,118 @@ function finish() {
       <div><div class="big">${S.errors}</div><span>ошибок всего</span></div>
       <div><div class="big">${S.layoutErr}</div><span>ошибок раскладки</span></div>
       <div><div class="big">${S.shiftErr}</div><span>ошибок Shift${S.shiftWarn ? ` (+${S.shiftWarn} предупр.)` : ''}</span></div>
+      ${+settings.ceiling ? `<div><div class="big">${S.fastWords}</div><span>слов быстрее потолка</span></div>` : ''}
     </div>
     <button class="primary" id="againBtn">Ещё</button>
     <div class="muted small" style="margin-top:6px">Enter или пробел — следующий урок</div>`;
   $('againBtn').onclick = () => startLesson();
   setMsg('', '');
+}
+
+// a screen between lessons: Enter / space / the button continue
+function showScreen(html, cont) {
+  if (S) { S.done = true; S.onContinue = cont; }
+  clearTimeout(revealTimer);
+  $('text').classList.add('hidden');
+  const r = $('result');
+  r.classList.remove('hidden');
+  r.innerHTML = html + `<button class="primary" id="contBtn">Продолжить</button>
+    <div class="muted small" style="margin-top:6px">Enter — продолжить</div>`;
+  $('contBtn').onclick = e => { e.currentTarget.blur(); cont(); };
+  setMsg('', '');
+  update();
+}
+
+/* ---------- daily training ---------- */
+let BLOCK_MS = 5 * 60000;
+const DAY_GOAL_MS = 10 * 60000;
+let daily = null;   // { blocks, idx, blockMs, waiting, prevMode, timer }
+function shiftDay(key, delta) {
+  const [y, m, d] = key.split('-').map(Number);
+  return dayKey(new Date(y, m - 1, d + delta).getTime());
+}
+function streakInfo() {
+  const today = dayKey(Date.now()), yest = shiftDay(today, -1);
+  const ok = k => (days[k] || 0) >= DAY_GOAL_MS;
+  let n = 0, k = ok(today) ? today : yest;
+  while (ok(k)) { n++; k = shiftDay(k, -1); }
+  const earlier = Object.keys(days).some(x => x < yest && days[x] > 0);
+  return { streak: n, todayMs: days[today] || 0, yestMs: days[yest] || 0, missedYesterday: !ok(yest) && earlier };
+}
+function renderStreak() {
+  const si = streakInfo();
+  $('streak').innerHTML = `Дней подряд: <b>${si.streak}</b> · сегодня ${Math.floor(si.todayMs / 60000)} из 10 мин` +
+    (si.missedYesterday ? ' · <span class="miss">вчера пропущено</span>' : '');
+}
+function dailyElapsed() {
+  if (!daily) return 0;
+  let cur = 0;
+  if (!daily.waiting && S && S.startT && !S.done) cur = Math.max(0, Math.min(performance.now(), S.lastT + 5000) - S.startT);
+  return daily.blockMs + cur;
+}
+const mmss = ms => { const t = Math.max(0, Math.ceil(ms / 1000)); return `${pad2(Math.floor(t / 60))}:${pad2(t % 60)}`; };
+function renderDailyBar() {
+  const bar = $('dailyBar');
+  if (!daily) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  const el = Math.min(BLOCK_MS, dailyElapsed()), b = daily.blocks[Math.min(daily.idx, daily.blocks.length - 1)];
+  const total = Math.min(100, Math.round(100 * (Math.min(daily.idx, daily.blocks.length) * BLOCK_MS + (daily.waiting ? 0 : el)) / (daily.blocks.length * BLOCK_MS)));
+  bar.innerHTML = `<div class="row"><span><b>Тренировка дня</b> · блок ${Math.min(daily.idx + 1, daily.blocks.length)} из ${daily.blocks.length}: ${b.label}</span>
+    <span>осталось <span class="t">${daily.waiting ? mmss(BLOCK_MS) : mmss(BLOCK_MS - el)}</span></span>
+    <span class="muted">всего ${total}%</span><button id="dailyStop" style="margin-left:auto">Прервать</button></div>
+    <div class="bar"><div style="width:${total}%"></div></div>`;
+  $('dailyStop').onclick = e => { e.currentTarget.blur(); stopDaily(); startLesson(); };
+}
+function dailyTick() {
+  if (!daily) return;
+  if (!daily.waiting && dailyElapsed() >= BLOCK_MS) endBlock();
+  renderDailyBar();
+}
+function startDaily() {
+  stopDaily();
+  const today = dayKey(Date.now());
+  const d = store.get(K_DAILY, {});
+  const lang = d.lastDate === today ? d.lastLang : (d.lastLang === 'RU' ? 'EN' : 'RU');
+  store.set(K_DAILY, { lastDate: today, lastLang: lang });
+  const weak = weakInfo().L ? { mode: 'weak', label: 'Слабые места' } : { mode: 'mixed', label: 'Смешанный (для «Слабых мест» пока мало данных)' };
+  daily = {
+    blocks: [{ mode: 'digits', label: 'Цифры' }, weak, { mode: 'sym' + lang, label: 'Знаки ' + lang }],
+    idx: 0, blockMs: 0, waiting: true, prevMode: settings.mode
+  };
+  daily.timer = setInterval(dailyTick, 250);
+  renderDailyBar();
+  showScreen(`<div class="big" style="font-size:24px">Тренировка дня</div>
+    <p>${daily.blocks.map(b => b.label).join(' → ')}, по 5 минут.<br><span class="muted small">Время идёт, только пока печатаешь.</span></p>`, startBlock);
+}
+function startBlock() {
+  daily.waiting = false;
+  daily.blockMs = 0;
+  setMode(daily.blocks[daily.idx].mode);
+  renderDailyBar();
+}
+function endBlock() {
+  if (S && !S.done && S.startT && S.pos > 0) { S.done = true; recordLesson(); }
+  daily.waiting = true;
+  daily.idx++;
+  if (daily.idx < daily.blocks.length) {
+    const b = daily.blocks[daily.idx];
+    showScreen(`<div class="big" style="font-size:24px">Блок ${daily.idx} из ${daily.blocks.length} готов</div>
+      <p>Дальше: <b>${b.label}</b> — 5 мин.</p>`, startBlock);
+  } else {
+    const prev = daily.prevMode;
+    clearInterval(daily.timer);
+    daily = null;
+    renderDailyBar();
+    const si = streakInfo();
+    showScreen(`<div class="big" style="font-size:24px">Тренировка дня завершена</div>
+      <p>Дней подряд: <b>${si.streak}</b>. Сегодня ${Math.floor(si.todayMs / 60000)} мин.</p>`, () => setMode(prev));
+  }
+}
+function stopDaily() {
+  if (!daily) return;
+  clearInterval(daily.timer);
+  daily = null;
+  renderDailyBar();
 }
 
 /* ---------- mode options ---------- */
@@ -1146,7 +1478,23 @@ function renderModeOpts() {
       wrap.appendChild(lab);
     });
     d.appendChild(wrap);
-    box.appendChild(d);
+    const dens = document.createElement('label');
+    dens.className = 'quick densRow';
+    const rg = document.createElement('input');
+    rg.type = 'range'; rg.min = 1; rg.max = 4; rg.step = 1; rg.id = 'densRange';
+    rg.value = settings.density;
+    const val = document.createElement('span');
+    const say = v => +v === 1 ? 'знак в каждом слове' : `знак примерно в каждом ${v}-м слове`;
+    val.textContent = say(rg.value);
+    rg.oninput = () => { val.textContent = say(rg.value); };
+    rg.onchange = () => { settings.density = +rg.value; saveSettings(); rg.blur(); startLesson(); };
+    dens.append('Плотность знаков', rg, val);
+    box.append(dens, d);
+  } else if (m === 'weak') {
+    const info = document.createElement('div');
+    info.className = 'muted small';
+    info.id = 'weakInfo';
+    box.appendChild(info);
   } else if (m === 'custom') {
     const c = store.get(K_CUSTOM, { text: '', offset: 0 });
     const ta = document.createElement('textarea');
@@ -1168,6 +1516,14 @@ function renderModeOpts() {
   }
 }
 
+function renderWeakInfo() {
+  const el = $('weakInfo');
+  if (!el) return;
+  const w = weakState;
+  el.textContent = w.L ? `Слабые знаки (${w.L}): ${w.chars.map(r => qch(r.ch)).join(' ')}` +
+    (w.pairs.length ? ` · путаницы: ${w.pairs.map(p => `${qch(p.e)}→${qch(p.p)}`).join(', ')}` : '') : '';
+}
+
 function applyView() {
   $('hintSel').value = hintLevel();
   $('kbSel').value = kbView();
@@ -1183,6 +1539,7 @@ function setMode(m) {
   applyView();
   renderModeOpts();
   startLesson();
+  renderWeakInfo();
 }
 
 /* ---------- stats tab ---------- */
@@ -1214,13 +1571,12 @@ function renderStats() {
   const h = $('histTable');
   if (!history.length) h.innerHTML = '<tr><td class="muted">Пока нет уроков.</td></tr>';
   else {
-    const MODE_NAME = { digits: 'Цифры', symRU: 'Знаки RU', symEN: 'Знаки EN', mixed: 'Смешанный', custom: 'Свой текст' };
     h.innerHTML = '<tr><th>Когда</th><th>Режим</th><th>Знаков</th><th>wpm</th><th>Точность</th><th>Ошибок</th><th>Раскладка</th><th>Shift</th></tr>';
     history.slice().reverse().forEach(x => {
       const tr = document.createElement('tr');
       const d = new Date(x.t);
       const when = `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-      [when, MODE_NAME[x.mode] || x.mode, x.chars, x.wpm, String(x.acc).replace('.', ',') + '%', x.errors, x.layoutErr,
+      [when, MODE_NAMES[x.mode] || x.mode, x.chars, x.wpm, String(x.acc).replace('.', ',') + '%', x.errors, x.layoutErr,
         x.shiftErr + (x.shiftWarn ? ` (+${x.shiftWarn})` : '')].forEach(c => {
         const td = document.createElement('td'); td.textContent = c; tr.appendChild(td);
       });
@@ -1245,8 +1601,8 @@ function renderReset(confirming) {
   yes.className = 'primary';
   yes.textContent = 'Да, удалить всё';
   yes.onclick = () => {
-    stats = {}; history = []; totals = { lessons: 0, ms: 0 };
-    store.del(K_STATS); store.del(K_HIST); store.del(K_TOTALS); renderStats();
+    stats = {}; history = []; totals = { lessons: 0, ms: 0 }; days = {};
+    store.del(K_STATS); store.del(K_HIST); store.del(K_TOTALS); store.del(K_DAYS); renderStats(); renderStreak();
   };
   const no = document.createElement('button');
   no.textContent = 'Отмена';
@@ -1256,7 +1612,7 @@ function renderReset(confirming) {
 }
 
 /* ---------- report for Claude ---------- */
-const MODE_NAMES = { digits: 'Цифры', symRU: 'Знаки RU', symEN: 'Знаки EN', mixed: 'Смешанный', custom: 'Свой текст' };
+const MODE_NAMES = { digits: 'Цифры', weak: 'Слабые места', symRU: 'Знаки RU', symEN: 'Знаки EN', mixed: 'Смешанный', custom: 'Свой текст' };
 const HINT_NAMES = { full: 'полная', demand: 'по запросу', none: 'без подсказок' };
 const KB_NAMES = { labels: 'с подписями', colors: 'только цвета', hidden: 'скрыта' };
 const qch = c => c === ' ' ? 'пробел' : '«' + c + '»';
@@ -1280,9 +1636,16 @@ function buildReport(lim) {
   out.push(`Уроков всего: ${totals.lessons} (~${mins(totals.ms)} мин); за 7 дней: ${week.length} (~${mins(week.reduce((a, x) => a + lessonMs(x), 0))} мин).`);
   if (totals.lessons < 5) out.push(`Данных мало: меньше 5 уроков, выводы предварительные.`);
   out.push('', '## Настройки');
-  out.push(`Строгий Shift: ${settings.strict ? 'вкл' : 'выкл'}. Клавиатура ${settings.iso ? 'ISO' : 'ANSI'}.`);
+  out.push(`Строгий Shift: ${settings.strict ? 'вкл' : 'выкл'}. Клавиатура ${settings.iso ? 'ISO' : 'ANSI'}. ` +
+    `Потолок скорости: ${+settings.ceiling ? settings.ceiling + ' wpm' : 'выкл'}. Перепечатка слова с ошибкой: ${+settings.retype ? settings.retype + ' раза' : 'выкл'}. Плотность знаков: в каждом ${settings.density}-м слове.`);
   out.push('Подсказка / клавиатура: ' + Object.keys(MODE_NAMES).map(m =>
     `${MODE_NAMES[m]}: ${HINT_NAMES[settings.hint[m]]} / ${KB_NAMES[settings.kbView[m]]}`).join('; ') + '.');
+
+  const si = streakInfo();
+  out.push('', '## Тренировка дня');
+  out.push(`Дней подряд: ${si.streak} (день засчитывается от 10 мин). Сегодня ${mins(si.todayMs)} мин; вчера ${si.missedYesterday ? 'пропущено' : mins(si.yestMs) + ' мин'}.`);
+  const today = dayKey(now);
+  out.push('Минуты за 7 дней: ' + [6, 5, 4, 3, 2, 1, 0].map(k => { const dk = shiftDay(today, -k); return `${dk.slice(8)}.${dk.slice(5, 7)} ${mins(days[dk] || 0)}`; }).join(', ') + '.');
 
   out.push('', '## Режимы: последние 10 уроков (предыдущие 10)');
   const avg = (arr, f) => arr.reduce((a, x) => a + f(x), 0) / arr.length;
@@ -1312,6 +1675,24 @@ function buildReport(lim) {
     w.forEach(r => out.push(`${qch(r.ch)} (${keyLabel(r.ch, L)}): ${r.s.a} / ${Math.round(r.er * 100)}% / ${r.avg != null ? Math.round(r.avg) : '—'}`));
   });
 
+  const avgT = f => { let t = 0, n = 0; rows.forEach(r => { if (f(r.ch)) { t += r.s.t || 0; n += r.s.n || 0; } }); return n ? Math.round(t / n) + ' мс' : '—'; };
+  out.push('', '## Среднее время нажатия');
+  out.push(`Буква ${avgT(isLetter)}, знак ${avgT(c => !isLetter(c) && c !== ' ' && !/[0-9]/.test(c))}, цифра ${avgT(c => /[0-9]/.test(c))}.`);
+  ['RU', 'EN'].forEach(L => {
+    const hs = history.filter(x => x.mode === 'sym' + L && x.cnt).slice(-10);
+    if (!hs.length) return;
+    const en = settings['sym' + L];
+    const sum = k => hs.reduce((a, x) => a + (x.cnt[k] || 0), 0);
+    const items = [];
+    SYM_TOGGLES[L].filter(t => en[t]).forEach(t => {
+      if (t === '.') { items.push(`«.» ${sum('.')}`, `«...» ${sum('...')}`); return; }
+      if (t === '0-9') { items.push(`цифры ${sum('0-9')}`); return; }
+      const cs = toggleChars(t);
+      items.push(`«${t}» ${cs.length > 1 ? Math.min(...cs.map(sum)) : sum(t)}`);
+    });
+    out.push('', `## Знаки ${L}: сколько раз встретились (последние ${hs.length} ур.)`, items.join(', ') + '.');
+  });
+
   const conf = [];
   rows.forEach(r => { if (r.s.x) Object.keys(r.s.x).forEach(p => conf.push({ r, p, n: r.s.x[p] })); });
   conf.sort((a, b) => b.n - a.n);
@@ -1335,7 +1716,8 @@ function buildReport(lim) {
   out.push('', `## Последние уроки (${Math.min(lim.lessons, history.length)})`);
   if (!history.length) out.push('Пока нет.');
   history.slice(-lim.lessons).reverse().forEach(x => out.push(
-    `${ddmm(x.t)} ${MODE_NAMES[x.mode] || x.mode}: ${x.wpm} wpm, ${fmt1(x.acc)}%, раскладка ${x.layoutErr}, Shift ${x.shiftErr}`));
+    `${ddmm(x.t)} ${MODE_NAMES[x.mode] || x.mode}: ${x.wpm} wpm, ${fmt1(x.acc)}%, раскладка ${x.layoutErr}, Shift ${x.shiftErr}` +
+    (x.fast ? `, быстрых слов ${x.fast}` : '')));
   return out.join('\n');
 }
 // keep the report under ~3000 chars by shortening the lists
@@ -1373,7 +1755,12 @@ function setTab(t) {
 
 function init() {
   $('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { setTab(b.dataset.tab); b.blur(); } });
-  $('modes').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { setMode(b.dataset.mode); b.blur(); } });
+  $('modes').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { stopDaily(); setMode(b.dataset.mode); b.blur(); } });
+  $('dailyBtn').onclick = e => { e.currentTarget.blur(); startDaily(); };
+  $('optCeiling').value = String(settings.ceiling);
+  $('optCeiling').onchange = e => { settings.ceiling = +e.target.value; saveSettings(); };
+  $('optRetype').value = String(settings.retype);
+  $('optRetype').onchange = e => { settings.retype = +e.target.value; saveSettings(); };
   $('newBtn').onclick = e => { e.currentTarget.blur(); startLesson(); };
   $('hintSel').onchange = e => {
     settings.hint[settings.mode] = e.target.value; saveSettings(); e.target.blur(); applyView();
@@ -1397,6 +1784,7 @@ function init() {
   document.addEventListener('visibilitychange', () => { shiftL = shiftR = false; releaseAll(); if (document.hidden) saveStats(); });
   window.addEventListener('pagehide', saveStats);
   buildKeyboard();
+  renderStreak();
   setMode(settings.mode);
 }
 init();
@@ -1404,7 +1792,9 @@ init();
 // hooks for automated tests
 window.__tt = {
   get state() { return S; }, get settings() { return settings; }, get stats() { return stats; },
-  load: text => startLesson(text), generate, typeable, assignLayouts, report: makeReport
+  load: text => startLesson(text), generate, typeable, assignLayouts, report: makeReport,
+  get daily() { return daily; }, get days() { return days; }, get weak() { return weakState; },
+  setBlockMs: ms => { BLOCK_MS = ms; }, tick: dailyTick, streakInfo, symLessonOk
 };
 </script>
 </body>
