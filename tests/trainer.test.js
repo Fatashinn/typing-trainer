@@ -25,6 +25,35 @@ const st = page => page.evaluate(() => { const s = window.__tt.state; return { p
   const errs = [];
   page.on('pageerror', e => errs.push(String(e)));
   await page.goto(URL);
+  const ringed = p => p.evaluate(() => [...document.querySelectorAll('.key.next')].map(e => e.dataset.code).sort().join(','));
+
+  // 0. hint levels and keyboard views, per mode
+  check('по умолчанию подсказка «по запросу»', await page.inputValue('#hintSel') === 'demand');
+  await page.evaluate(() => window.__tt.load('да: да'));
+  check('по запросу: до нажатия ничего не подсвечено', await ringed(page) === '' && (await page.textContent('#hint')) === '');
+  await press(page, 'KeyS', 'ы');
+  check('по запросу: после ошибки подсказка появилась', await ringed(page) === 'KeyL' && (await page.textContent('#hint')).includes('д →'));
+  await press(page, 'KeyL', 'д');
+  check('по запросу: на следующем знаке снова скрыто', await ringed(page) === '');
+  await page.waitForTimeout(1700);
+  check('по запросу: после паузы 1,5 с подсказка появилась', await ringed(page) === 'KeyF');
+  await page.selectOption('#hintSel', 'none');
+  await page.evaluate(() => window.__tt.load('да: да'));
+  await press(page, 'KeyS', 'ы');
+  await page.waitForTimeout(1700);
+  check('без подсказок: ни после ошибки, ни после паузы', await ringed(page) === '' && (await page.textContent('#hint')) === '' && (await page.textContent('#msg')) === 'Ошибка.');
+  await page.selectOption('#kbSel', 'colors');
+  check('клавиатура «только цвета»: подписей не видно', !(await page.isVisible('.key[data-code="KeyL"] .m')) && await page.isVisible('#kb'));
+  await page.selectOption('#kbSel', 'hidden');
+  check('клавиатура «скрыта»', !(await page.isVisible('#kb')));
+  await page.click('[data-mode="symEN"]');
+  check('у другого режима свои настройки', await page.inputValue('#hintSel') === 'demand' && await page.inputValue('#kbSel') === 'labels' && await page.isVisible('#kb'));
+  await page.click('[data-mode="symRU"]');
+  check('режим помнит свои настройки', await page.inputValue('#hintSel') === 'none' && await page.inputValue('#kbSel') === 'hidden');
+  await press(page, 'KeyA', 'ф');
+  check('после выбора в списке ввод не теряется', (await st(page)).errors === 1);
+  await page.selectOption('#kbSel', 'labels');
+  await page.selectOption('#hintSel', 'full');
 
   // 1. correct char advances, wrong char does not
   await page.evaluate(() => window.__tt.load('ab;c'));
@@ -163,6 +192,7 @@ const st = page => page.evaluate(() => { const s = window.__tt.state; return { p
     const p = await c.newPage();
     await p.goto(URL);
     await p.click('[data-mode="mixed"]');
+    await p.selectOption('#hintSel', 'full');
     await p.evaluate(() => window.__tt.load('Срок: 15.11, Settings (№ 3) - 15%.'));
     await key(p, 'keydown', 'ShiftRight', 'Shift', true);
     await press(p, 'KeyC', 'С', true);

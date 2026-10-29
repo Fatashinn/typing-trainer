@@ -126,6 +126,10 @@ textarea { width: 100%; min-height: 90px; background: var(--bg); border: 1px sol
 
 /* keyboard */
 #kbWrap { margin-top: 10px; container-type: inline-size; }
+#kbWrap.colors .key .m, #kbWrap.colors .key .alt { visibility: hidden; }
+#textBox.nohint #text span.en { text-decoration: none; }
+.quick { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--muted); }
+.quick select { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 4px 6px; font-size: 14px; }
 #kb { position: relative; width: 100%; aspect-ratio: 15 / 5; }
 .key {
   position: absolute; border-radius: 6px; color: var(--key-fg);
@@ -185,7 +189,21 @@ h2:first-child { margin-top: 0; }
         <button data-mode="mixed">Смешанный</button>
         <button data-mode="custom">Свой текст</button>
       </div>
+      <div class="row" style="gap:8px">
       <button id="newBtn" title="Esc">Новый текст</button>
+      <label class="quick">Подсказка
+        <select id="hintSel" data-quick="1">
+          <option value="full">полная</option>
+          <option value="demand">по запросу</option>
+          <option value="none">без подсказок</option>
+        </select></label>
+      <label class="quick">Клавиатура
+        <select id="kbSel" data-quick="1">
+          <option value="labels">с подписями</option>
+          <option value="colors">только цвета</option>
+          <option value="hidden">скрыта</option>
+        </select></label>
+      </div>
     </div>
     <div id="modeOpts"></div>
     <div class="panel" id="textBox">
@@ -461,11 +479,18 @@ const toggleChars = t => t === '0-9' ? '0123456789'.split('') : t.length === 2 &
 const defaults = {
   mode: 'symRU', strict: true, iso: false, digitsLayout: 'RU', lastLayout: 'RU',
   symRU: Object.fromEntries(SYM_TOGGLES.RU.map(t => [t, true])),
-  symEN: Object.fromEntries(SYM_TOGGLES.EN.map(t => [t, true]))
+  symEN: Object.fromEntries(SYM_TOGGLES.EN.map(t => [t, true])),
+  // per training mode: hint level and how the on-screen keyboard looks
+  hint: { digits: 'demand', symRU: 'demand', symEN: 'demand', mixed: 'demand', custom: 'demand' },
+  kbView: { digits: 'labels', symRU: 'labels', symEN: 'labels', mixed: 'labels', custom: 'labels' }
 };
 const settings = Object.assign({}, defaults, store.get(K_SETTINGS, {}));
 settings.symRU = Object.assign({}, defaults.symRU, settings.symRU);
 settings.symEN = Object.assign({}, defaults.symEN, settings.symEN);
+settings.hint = Object.assign({}, defaults.hint, settings.hint);
+settings.kbView = Object.assign({}, defaults.kbView, settings.kbView);
+const hintLevel = () => settings.hint[settings.mode] || 'demand';
+const kbView = () => settings.kbView[settings.mode] || 'labels';
 const saveSettings = () => store.set(K_SETTINGS, settings);
 
 let stats = store.get(K_STATS, {});
@@ -655,6 +680,19 @@ const $ = id => document.getElementById(id);
 let S = null;
 let shiftL = false, shiftR = false;
 let tab = 'train';
+let revealTimer = null;
+const REVEAL_MS = 1500;
+
+// "on demand" hint: show the key after an error or after a pause at the same position
+function armReveal() {
+  clearTimeout(revealTimer);
+  S.reveal = false;
+  if (hintLevel() !== 'demand' || S.done || !S.text) return;
+  const lesson = S, pos = S.pos;
+  revealTimer = setTimeout(() => {
+    if (S === lesson && S.pos === pos && !S.done) { S.reveal = true; highlightNext(); }
+  }, REVEAL_MS);
+}
 
 function startLesson(text) {
   text = text == null ? generate(settings.mode) : text;
@@ -668,6 +706,7 @@ function startLesson(text) {
   $('text').classList.remove('hidden');
   renderText();
   setMsg('', '');
+  armReveal();
   update();
 }
 
@@ -778,6 +817,8 @@ function highlightNext() {
   const ch = S.text[S.pos], L = S.layouts[S.pos];
   const k = keyFor(ch, L);
   if (!k) { hint.textContent = ''; return; }
+  const lvl = hintLevel();
+  if (!(lvl === 'full' || (lvl === 'demand' && S.reveal))) { hint.textContent = ''; return; }
   const mark = code => { const el = $('kb').querySelector(`[data-code="${code}"]`); if (el) el.classList.add('next'); };
   mark(k.code);
   if (k.shiftSide) mark(k.shiftSide === 'L' ? 'ShiftLeft' : 'ShiftRight');
@@ -798,7 +839,8 @@ const IGNORE_KEYS = new Set(['Shift', 'Control', 'Alt', 'AltGraph', 'Meta', 'OS'
 
 function isTextField(t) {
   if (!t || !t.tagName) return false;
-  if (t.tagName === 'TEXTAREA' || t.tagName === 'SELECT') return true;
+  if (t.tagName === 'SELECT') return !t.dataset.quick;
+  if (t.tagName === 'TEXTAREA') return true;
   return t.tagName === 'INPUT' && t.type !== 'checkbox' && t.type !== 'radio';
 }
 
@@ -847,7 +889,8 @@ function handleChar(e) {
   if (e.key === exp) {
     const need = wrongShift(e);
     if (need) {
-      const txt = `Shift не той рукой: для «${exp}» нужен ${need === 'L' ? 'левый' : 'правый'} Shift.`;
+      const txt = hintLevel() === 'none' ? 'Shift не той рукой.' :
+        `Shift не той рукой: для «${exp}» нужен ${need === 'L' ? 'левый' : 'правый'} Shift.`;
       if (settings.strict) {
         if (!S.posShift) S.shiftErr++;
         S.posShift = true;
@@ -868,15 +911,17 @@ function handleChar(e) {
   if (isLayoutErr) {
     if (!S.posLayout) S.layoutErr++;
     S.posLayout = true;
-    return miss(`Переключи раскладку (Ctrl+Space): нужна ${L}.`, 'err');
+    return miss(hintLevel() === 'none' ? 'Переключи раскладку (Ctrl+Space).' : `Переключи раскладку (Ctrl+Space): нужна ${L}.`, 'err');
   }
-  return miss('', '');
+  return hintLevel() === 'none' ? miss('Ошибка.', 'err') : miss('', '');
 }
 
 function miss(text, kind) {
   S.errors++;
   S.posErr = true;
   S.errAt.add(S.pos);
+  S.reveal = true;
+  clearTimeout(revealTimer);
   setMsg(text, kind);
   update();
 }
@@ -896,6 +941,7 @@ function advance(now, statLayout) {
   S.posErr = S.posLayout = S.posShift = false;
   if (++S.sinceSave >= 25) { S.sinceSave = 0; saveStats(); }
   if (S.pos >= S.text.length) return finish();
+  armReveal();
   update();
 }
 
@@ -971,10 +1017,19 @@ function renderModeOpts() {
   }
 }
 
+function applyView() {
+  $('hintSel').value = hintLevel();
+  $('kbSel').value = kbView();
+  $('kbWrap').classList.toggle('colors', kbView() === 'colors');
+  $('kbWrap').classList.toggle('hidden', kbView() === 'hidden');
+  $('textBox').classList.toggle('nohint', hintLevel() === 'none');
+}
+
 function setMode(m) {
   settings.mode = m;
   saveSettings();
   for (const b of $('modes').children) b.setAttribute('aria-pressed', String(b.dataset.mode === m));
+  applyView();
   renderModeOpts();
   startLesson();
 }
@@ -1058,6 +1113,11 @@ function init() {
   $('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { setTab(b.dataset.tab); b.blur(); } });
   $('modes').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { setMode(b.dataset.mode); b.blur(); } });
   $('newBtn').onclick = e => { e.currentTarget.blur(); startLesson(); };
+  $('hintSel').onchange = e => {
+    settings.hint[settings.mode] = e.target.value; saveSettings(); e.target.blur(); applyView();
+    if (S && !S.done) { armReveal(); update(); }
+  };
+  $('kbSel').onchange = e => { settings.kbView[settings.mode] = e.target.value; saveSettings(); e.target.blur(); applyView(); };
   $('stLayout').onchange = renderStats;
   $('stNoLetters').onchange = renderStats;
   $('optStrict').checked = settings.strict;
