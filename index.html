@@ -160,7 +160,7 @@ textarea { width: 100%; min-height: 90px; background: var(--bg); border: 1px sol
   background: linear-gradient(180deg, var(--case-top), var(--case-bottom));
   box-shadow: inset 0 0 0 1px var(--case-edge);
 }
-#kb { position: relative; width: 100%; aspect-ratio: 15 / 6; }
+#kb { position: relative; width: 100%; aspect-ratio: 14.5 / 6; }
 .key {
   position: absolute; border-radius: .8cqw; color: var(--key-fg);
   display: flex; align-items: center; justify-content: center;
@@ -375,17 +375,18 @@ const FINGER_NAME = {
   ri: 'правый указательный', rm: 'правый средний', rr: 'правый безымянный', rp: 'правый мизинец', th: 'большой палец'
 };
 
-// MacBook Air M2 (ANSI, US): 15 units wide, 6 rows; the function row is full height
+// MacBook Air M2 (ANSI, US): 14.5 units wide, 6 rows; the function row is full height
+const KB_W = 14.5, KB_H = 6;
 function geometry(iso) {
-  const fw = (15 - 1.5 - 1) / 12;
+  const fw = (KB_W - 1.5 - 1) / 12;
   const rows = [
     [['Escape', 1.5], ...Array.from({ length: 12 }, (_, i) => ['F' + (i + 1), fw]), ['TouchID', 1]],
-    [['Backquote', 1], ...'1234567890'.split('').map(d => ['Digit' + d, 1]), ['Minus', 1], ['Equal', 1], ['Backspace', 2]],
-    [['Tab', 1.5], ...'QWERTYUIOP'.split('').map(c => ['Key' + c, 1]), ['BracketLeft', 1], ['BracketRight', 1], ['Backslash', 1.5]],
-    [['CapsLock', 1.75], ...'ASDFGHJKL'.split('').map(c => ['Key' + c, 1]), ['Semicolon', 1], ['Quote', 1], ['Enter', 2.25]],
+    [['Backquote', 1], ...'1234567890'.split('').map(d => ['Digit' + d, 1]), ['Minus', 1], ['Equal', 1], ['Backspace', 1.5]],
+    [['Tab', 1.5], ...'QWERTYUIOP'.split('').map(c => ['Key' + c, 1]), ['BracketLeft', 1], ['BracketRight', 1], ['Backslash', 1]],
+    [['CapsLock', 1.75], ...'ASDFGHJKL'.split('').map(c => ['Key' + c, 1]), ['Semicolon', 1], ['Quote', 1], ['Enter', 1.75]],
     [...(iso ? [['ShiftLeft', 1.25], ['IntlBackslash', 1]] : [['ShiftLeft', 2.25]]),
-      ...'ZXCVBNM'.split('').map(c => ['Key' + c, 1]), ['Comma', 1], ['Period', 1], ['Slash', 1], ['ShiftRight', 2.75]],
-    [['Fn', 1], ['ControlLeft', 1], ['AltLeft', 1], ['MetaLeft', 1.25], ['Space', 5.5], ['MetaRight', 1.25], ['AltRight', 1],
+      ...'ZXCVBNM'.split('').map(c => ['Key' + c, 1]), ['Comma', 1], ['Period', 1], ['Slash', 1], ['ShiftRight', 2.25]],
+    [['Fn', 1], ['ControlLeft', 1], ['AltLeft', 1], ['MetaLeft', 1.25], ['Space', 5], ['MetaRight', 1.25], ['AltRight', 1],
       ['ArrowLeft', 1], ['ArrowUp', 1, 0.5], ['ArrowRight', 1]]
   ];
   const keys = [];
@@ -862,10 +863,10 @@ function buildKeyboard() {
     if (downCodes.has(k.code)) el.classList.add('down');
     el.dataset.code = k.code;
     const g = 0.06; // half of the gap between keys, in key units
-    el.style.left = `${(k.x + g) / 15 * 100}%`;
-    el.style.top = `${(k.y + g) / 6 * 100}%`;
-    el.style.width = `${(k.w - 2 * g) / 15 * 100}%`;
-    el.style.height = `${(k.h - 2 * g) / 6 * 100}%`;
+    el.style.left = `${(k.x + g) / KB_W * 100}%`;
+    el.style.top = `${(k.y + g) / KB_H * 100}%`;
+    el.style.width = `${(k.w - 2 * g) / KB_W * 100}%`;
+    el.style.height = `${(k.h - 2 * g) / KB_H * 100}%`;
     kb.appendChild(el);
   });
   kbIso = settings.iso;
