@@ -355,11 +355,17 @@ h2:first-child { margin-top: 0; }
   </section>
 </div>
 
+<script src="platform/languages.js"></script>
+<script src="platform/layouts.js"></script>
+<script src="platform/learning.js"></script>
+<script src="platform/storage.js"></script>
+<script src="platform/i18n.js"></script>
 <script>
 'use strict';
 
 /* Backups preserve exact stored JSON; analytics reports use a separate format. */
-const USER_KEYS = ['tt.settings', 'tt.stats', 'tt.history', 'tt.custom', 'tt.totals', 'tt.days', 'tt.daily'];
+const LEGACY_USER_KEYS = ['tt.settings', 'tt.stats', 'tt.history', 'tt.custom', 'tt.totals', 'tt.days', 'tt.daily'];
+const USER_KEYS = [...LEGACY_USER_KEYS, 'tt.platform'];
 const JOURNAL = 'tt.import-recovery.v1';
 const MAX_BACKUP_BYTES = 8 * 1024 * 1024;
 const protectedKeys = new Set();
@@ -381,7 +387,11 @@ function validateRecord(key, v) {
   const obj = () => requireData(object(v), key + ': нужен объект');
   const nums = (o, fields) => fields.forEach(f => requireData(number(o[f]), key + ': неверное поле ' + f));
   const optionalNums = (o, fields) => fields.forEach(f => { if (f in o) nums(o, [f]); });
-  const mode = x => ['digits', 'weak', 'symRU', 'symEN', 'mixed', 'custom'].includes(x);
+  const mode = x => ['digits', 'weak', 'symRU', 'symEN', 'mixed', 'custom', 'platform'].includes(x);
+  if (key === 'tt.platform') {
+    requireData(globalThis.TT2?.storage, 'Модуль данных платформы недоступен');
+    return TT2.storage.validate(v);
+  }
   if (key === 'tt.settings') {
     obj();
     if ('mode' in v) requireData(mode(v.mode), 'Неизвестный режим');
@@ -409,6 +419,7 @@ function validateRecord(key, v) {
       requireData(object(h) && mode(h.mode), 'Неверный урок');
       nums(h, ['t','chars','wpm','acc','errors','layoutErr','shiftErr']);
       optionalNums(h, ['ms','shiftWarn','fast','activeMs','wpmMs','longBreaks']);
+      if ('platformLesson' in h) TT2.storage.validateLesson(h.platformLesson);
       if ('timingVersion' in h) {
         requireData(h.timingVersion === 2 && typeof h.id === 'string' && ['completed','interrupted','block-ended'].includes(h.status), 'Неверная версия времени урока');
         nums(h, ['activeMs','wpmMs','longBreaks']);
@@ -440,16 +451,16 @@ function validateRecord(key, v) {
 function readSnapshot() {
   return Object.fromEntries(USER_KEYS.map(k => [k, window.localStorage.getItem(k)]));
 }
-function validateSnapshot(raw, validateValues) {
-  requireData(object(raw) && Object.keys(raw).length === USER_KEYS.length && USER_KEYS.every(k => Object.hasOwn(raw, k)), 'Копия должна содержать ровно семь пользовательских ключей');
-  for (const k of USER_KEYS) {
+function validateSnapshot(raw, validateValues, keys = USER_KEYS) {
+  requireData(object(raw) && Object.keys(raw).length === keys.length && keys.every(k => Object.hasOwn(raw, k)), 'Копия содержит неверный набор пользовательских ключей');
+  for (const k of keys) {
     requireData(raw[k] === null || typeof raw[k] === 'string', 'Неверная запись ' + k);
-    if (validateValues) requireData(raw[k] === null || raw[k].length <= 2000000, 'Слишком большая запись ' + k);
+    if (validateValues) requireData(raw[k] === null || raw[k].length <= (['tt.platform','tt.history'].includes(k) ? 6000000 : 2000000), 'Слишком большая запись ' + k);
     if (validateValues && raw[k] !== null) validateRecord(k, JSON.parse(raw[k]));
   }
 }
 function restoreSnapshot(raw) {
-  for (const k of USER_KEYS) {
+  for (const k of USER_KEYS.filter(k => Object.hasOwn(raw, k))) {
     if (window.localStorage.getItem(k) === raw[k]) continue;
     if (raw[k] === null) window.localStorage.removeItem(k);
     else window.localStorage.setItem(k, raw[k]);
@@ -463,7 +474,8 @@ function recoverImport() {
     storageFrozen = true;
     const journal = JSON.parse(raw);
     requireData(journal.version === 1, 'Неизвестный журнал восстановления');
-    validateSnapshot(journal.before, false);
+    const journalKeys = Object.hasOwn(journal.before || {}, 'tt.platform') ? USER_KEYS : LEGACY_USER_KEYS;
+    validateSnapshot(journal.before, false, journalKeys);
     restoreSnapshot(journal.before);
     window.localStorage.removeItem(JOURNAL);
     storageFrozen = false;
@@ -477,9 +489,9 @@ recoverImport();
 function parseBackup(text) {
   requireData(new Blob([text]).size <= MAX_BACKUP_BYTES, 'Файл больше 8 МиБ');
   const b = JSON.parse(text);
-  requireData(object(b) && b.format === 'typing-trainer-backup' && b.version === 1, 'Неподдерживаемый формат или версия резервной копии');
+  requireData(object(b) && b.format === 'typing-trainer-backup' && [1, 2].includes(b.version), 'Неподдерживаемый формат или версия резервной копии');
   requireData(typeof b.exportedAt === 'string' && Number.isFinite(Date.parse(b.exportedAt)), 'Неверная дата копии');
-  validateSnapshot(b.entries, true);
+  validateSnapshot(b.entries, true, b.version === 1 ? LEGACY_USER_KEYS : USER_KEYS);
   return b;
 }
 function backupText() {
@@ -488,8 +500,9 @@ function backupText() {
   // Include unsaved progress and the memory fallback after a quota error.
   for (const k of USER_KEYS) if (!protectedKeys.has(k) && (entries[k] === null || store.failedWrites.has(k)) && Object.hasOwn(store.mem, k)) entries[k] = store.mem[k];
   const live = { 'tt.settings': settings, 'tt.stats': stats, 'tt.history': history, 'tt.totals': totals, 'tt.days': days };
+  if (globalThis.TT2?.appState) live['tt.platform'] = TT2.appState;
   for (const [k, value] of Object.entries(live)) if (!protectedKeys.has(k)) entries[k] = JSON.stringify(value);
-  const text = JSON.stringify({ format: 'typing-trainer-backup', version: 1, exportedAt: new Date().toISOString(), entries }, null, 2);
+  const text = JSON.stringify({ format: 'typing-trainer-backup', version: 2, exportedAt: new Date().toISOString(), entries }, null, 2);
   requireData(new Blob([text]).size <= MAX_BACKUP_BYTES, 'Копия превышает 8 МиБ');
   return text;
 }
@@ -796,7 +809,7 @@ settings.symRU = Object.assign({}, defaults.symRU, settings.symRU);
 settings.symEN = Object.assign({}, defaults.symEN, settings.symEN);
 settings.hint = Object.assign({}, defaults.hint, settings.hint);
 settings.kbView = Object.assign({}, defaults.kbView, settings.kbView);
-const hintLevel = () => settings.hint[settings.mode] || 'demand';
+let hintLevel = () => settings.hint[settings.mode] || 'demand';
 const kbView = () => settings.kbView[settings.mode] || 'labels';
 const saveSettings = () => store.set(K_SETTINGS, settings);
 
@@ -2136,7 +2149,7 @@ function fitPractice() {
   const fitted = innerWidth / scale >= 640 && available >= 480;
   stage.classList.toggle('fitted', fitted);
   stage.style.setProperty('--stage-height', available + 'px');
-  stage.style.setProperty('--keyboard-width', Math.max(0, (available - 220) * 14.5 / 6) + 'px');
+  stage.style.setProperty('--keyboard-width', Math.max(0, (available - (document.getElementById('platformInput')?.classList.contains('hidden') === false ? 280 : 220)) * 14.5 / 6) + 'px');
   scrollCurrent(true);
 }
 function initPracticeLayout() {
@@ -2172,7 +2185,7 @@ function initBackup() {
       const b = parseBackup(await file.text()); if (token !== generation) return;
       expected = readSnapshot(); pending = b;
       const hist = b.entries['tt.history'] === null ? [] : JSON.parse(b.entries['tt.history']);
-      $('backupSummary').textContent = 'Копия от ' + b.exportedAt + '. Уроков в истории: ' + hist.length + '. Будут заменены все семь разделов данных, включая отсутствующие в копии записи. Сохраните текущую копию перед заменой. Закройте другие вкладки тренажёра.';
+      $('backupSummary').textContent = 'Копия от ' + b.exportedAt + '. Уроков в истории: ' + hist.length + '. ' + (b.version === 1 ? 'Будут заменены семь разделов версии 1.x. Данные обучения и XP платформы 2.0 сохранятся без изменений.' : 'Будут заменены все восемь разделов, включая обучение и XP платформы 2.0.') + ' Сохраните текущую копию перед заменой. Закройте другие вкладки тренажёра.';
       $('backupPreview').classList.remove('hidden'); message('Файл проверен. Замена ещё не выполнена.');
     } catch (e) { if (token === generation) { cancel(); message('Импорт отклонён: ' + e.message); } }
   };
@@ -2181,7 +2194,20 @@ function initBackup() {
     try { replaceData(pending, expected); location.reload(); }
     catch (e) { cancel(); message(e.message); }
   };
-  window.addEventListener('storage', e => { if (USER_KEYS.includes(e.key) || e.key === null || e.key === JOURNAL) { cancel(); message('Хранилище изменено в другой вкладке. Перезагрузите страницу перед импортом.'); storageFrozen = true; } });
+  window.addEventListener('storage', e => {
+    if (!USER_KEYS.includes(e.key) && e.key !== null && e.key !== JOURNAL) return;
+    try {
+      // Events queued by a document being replaced may arrive after reload recovery.
+      // Ignore superseded values and changes already represented in this document.
+      if (e.key !== null && localStorage.getItem(e.key) !== e.newValue) return;
+      const live = { 'tt.settings': settings, 'tt.stats': stats, 'tt.history': history, 'tt.totals': totals, 'tt.days': days };
+      if (globalThis.TT2?.appState) live['tt.platform'] = TT2.appState;
+      if (Object.hasOwn(live, e.key) && JSON.stringify(live[e.key]) === JSON.stringify(e.newValue === null ? null : JSON.parse(e.newValue))) return;
+      if (e.key === K_CUSTOM && (!Object.hasOwn(store.mem, e.key) || store.mem[e.key] === e.newValue)) return;
+      if (e.key === JOURNAL && e.newValue === null) return;
+    } catch (error) { /* Inaccessible or invalid storage is a real conflict. */ }
+    cancel(); message('Хранилище изменено в другой вкладке. Перезагрузите страницу перед импортом.'); storageFrozen = true;
+  });
   showStorageWarnings();
 }
 
@@ -2248,5 +2274,6 @@ window.__tt = {
   setBlockMs: ms => { BLOCK_MS = ms; }, tick: dailyTick, streakInfo, symLessonOk
 };
 </script>
+<script src="platform/app.js"></script>
 </body>
 </html>
