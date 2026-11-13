@@ -134,6 +134,13 @@ textarea { width: 100%; min-height: 90px; background: var(--bg); border: 1px sol
   margin-top: 12px; min-height: 150px; position: relative;
   font-size: 23px; line-height: 1.6; letter-spacing: .02em;
 }
+#practiceStage { min-width: 0; }
+#textBox { max-height: min(45vh, 420px); overflow: auto; scrollbar-gutter: stable; }
+#practiceStage.fitted { height: var(--stage-height); display: flex; flex-direction: column; }
+#practiceStage.fitted #textBox { flex: 1 1 auto; min-height: 120px; max-height: none; }
+#practiceStage.fitted #status, #practiceStage.fitted #hint { flex: 0 0 auto; }
+#practiceStage.fitted #hint { max-height: 72px; overflow: auto; }
+#practiceStage.fitted #kbWrap { flex: 0 0 auto; width: min(100%, var(--keyboard-width)); margin-inline: auto; }
 #text { white-space: pre-wrap; overflow-wrap: break-word; }
 #text span.d { color: var(--done); }
 #text span.rep { background: var(--rep-bg); }
@@ -281,6 +288,7 @@ h2:first-child { margin-top: 0; }
     </div>
     <div id="modeOpts"></div>
     <div class="panel hidden" id="dailyBar"></div>
+    <div id="practiceStage">
     <div class="panel" id="textBox">
       <div id="text"></div>
       <div id="result" class="hidden"></div>
@@ -288,6 +296,7 @@ h2:first-child { margin-top: 0; }
     <div id="status"><span id="msg"></span><span id="live"></span></div>
     <div id="kbWrap"><div id="kbCase"><div id="kb"></div></div></div>
     <div id="hint"></div>
+    </div>
   </section>
 
   <section id="tab-stats" class="hidden">
@@ -1319,6 +1328,7 @@ function renderText() {
     frag.appendChild(sp);
   }
   box.appendChild(frag);
+  S.lastScrolledPos = -1;
 }
 
 function setMsg(text, kind) {
@@ -1342,6 +1352,7 @@ function update() {
   renderKeyboard(L);
   highlightNext();
   renderLive();
+  scrollCurrent();
 }
 
 function renderLive() {
@@ -2100,6 +2111,32 @@ function onReportClick() {
   } catch (e) { manual(); }
 }
 
+function scrollCurrent(force = false) {
+  if (!S || S.done || (!force && S.lastScrolledPos === S.pos)) return;
+  const current = $('text').children[S.pos], box = $('textBox');
+  if (!current) return;
+  S.lastScrolledPos = S.pos;
+  const r = current.getBoundingClientRect(), frame = box.getBoundingClientRect();
+  if (r.top < frame.top + 12) box.scrollTop -= frame.top + 12 - r.top;
+  else if (r.bottom > frame.bottom - 12) box.scrollTop += r.bottom - frame.bottom + 12;
+}
+function fitPractice() {
+  if (tab !== 'train') return;
+  const stage = $('practiceStage');
+  const available = Math.floor(innerHeight - (stage.getBoundingClientRect().top + scrollY) - 16);
+  const fitted = innerWidth >= 640 && available >= 480;
+  stage.classList.toggle('fitted', fitted);
+  stage.style.setProperty('--stage-height', available + 'px');
+  stage.style.setProperty('--keyboard-width', Math.max(0, (available - 220) * 14.5 / 6) + 'px');
+  scrollCurrent(true);
+}
+function initPracticeLayout() {
+  const observer = new ResizeObserver(() => requestAnimationFrame(fitPractice));
+  for (const el of [document.querySelector('header'), $('modeOpts'), $('dailyBar'), $('modes').parentElement]) observer.observe(el);
+  window.addEventListener('resize', fitPractice);
+  requestAnimationFrame(fitPractice);
+}
+
 function showStorageWarnings() {
   const note = document.getElementById('storageNote');
   if (note) note.textContent = [...storageWarnings].join(' ');
@@ -2146,12 +2183,14 @@ function setTab(t) {
   for (const b of $('tabs').children) b.setAttribute('aria-pressed', String(b.dataset.tab === t));
   ['train', 'stats', 'settings'].forEach(x => $('tab-' + x).classList.toggle('hidden', x !== t));
   if (t === 'stats') renderStats();
+  requestAnimationFrame(fitPractice);
 }
 
 function init() {
   for (const k of USER_KEYS) store.get(k, null);
   recoverPractice();
   initBackup();
+  initPracticeLayout();
   $("pauseBtn").onclick = e => { e.currentTarget.blur(); pauseButton(); };
   document.addEventListener("focusin", e => { if (isTextField(e.target) || e.target.tagName === "SELECT") suspendPractice(); });
   document.querySelector("#modeOpts").addEventListener("toggle", e => { if (e.target.open) suspendPractice(); }, true);
