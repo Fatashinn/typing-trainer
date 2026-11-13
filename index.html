@@ -327,7 +327,20 @@ h2:first-child { margin-top: 0; }
       <label><span><b>Перепечатать слово с ошибкой</b>
         <select id="optRetype"><option value="0">выкл</option><option value="2">2 раза</option><option value="3">3 раза</option></select><br>
         <span class="muted small">После слова с ошибкой оно вставляется в текст ещё N раз подряд (выделено фоном).</span></span></label>
-      <p class="muted small" id="storageNote"></p>
+      <h2>Резервная копия данных</h2>
+      <p>Копия содержит настройки, статистику, историю и собственный текст. Храните файл в безопасном месте. Это не аналитический отчёт для ИИ.</p>
+      <button id="backupExport">Скачать JSON</button>
+      <label>Импорт JSON <input id="backupFile" type="file" accept=".json,application/json"></label>
+      <div id="backupPreview" class="hidden">
+        <p id="backupSummary"></p>
+        <button id="backupBefore">Скачать текущие данные перед заменой</button>
+        <label><input id="backupConfirm" type="checkbox"> Подтверждаю замену всех текущих данных этой копией</label>
+        <button id="backupApply" disabled>Заменить данные</button>
+        <button id="backupCancel">Отмена</button>
+      </div>
+      <p id="backupMessage" role="status" aria-live="polite"></p>
+      <button id="backupRecover">Повторить восстановление</button>
+      <p class="muted small" id="storageNote" role="status"></p>
     </div>
   </section>
 </div>
@@ -335,22 +348,186 @@ h2:first-child { margin-top: 0; }
 <script>
 'use strict';
 
+/* Backups preserve exact stored JSON; analytics reports use a separate format. */
+const USER_KEYS = ['tt.settings', 'tt.stats', 'tt.history', 'tt.custom', 'tt.totals', 'tt.days', 'tt.daily'];
+const JOURNAL = 'tt.import-recovery.v1';
+const MAX_BACKUP_BYTES = 8 * 1024 * 1024;
+const protectedKeys = new Set();
+const storageWarnings = new Set();
+let storageFrozen = false;
+const object = x => x !== null && typeof x === 'object' && !Array.isArray(x);
+const number = x => Number.isFinite(x) && x >= 0 && x <= Number.MAX_SAFE_INTEGER;
+function requireData(ok, message) { if (!ok) throw new Error(message); }
+function safeTree(x, depth = 0) {
+  requireData(depth < 16, 'Слишком глубокая структура');
+  if (typeof x === 'number') requireData(number(x), 'Недопустимое число');
+  if (x && typeof x === 'object') for (const k of Object.keys(x)) {
+    requireData(!['__proto__', 'constructor', 'prototype'].includes(k), 'Недопустимое имя поля');
+    safeTree(x[k], depth + 1);
+  }
+}
+function validateRecord(key, v) {
+  safeTree(v);
+  const obj = () => requireData(object(v), key + ': нужен объект');
+  const nums = (o, fields) => fields.forEach(f => requireData(number(o[f]), key + ': неверное поле ' + f));
+  const optionalNums = (o, fields) => fields.forEach(f => { if (f in o) nums(o, [f]); });
+  const mode = x => ['digits', 'weak', 'symRU', 'symEN', 'mixed', 'custom'].includes(x);
+  if (key === 'tt.settings') {
+    obj();
+    if ('mode' in v) requireData(mode(v.mode), 'Неизвестный режим');
+    for (const k of ['strict', 'iso']) if (k in v) requireData(typeof v[k] === 'boolean', 'Неверная настройка ' + k);
+    for (const k of ['lastLayout', 'digitsLayout']) if (k in v) requireData(['RU', 'EN'].includes(v[k]), 'Неверная раскладка');
+    for (const [k, values] of [['density', [1,2,3,4]], ['retype', [0,2,3]], ['ceiling', [0,40,45,50,55,60,65,70,75,80]]])
+      if (k in v) requireData(values.includes(v[k]), 'Неверная настройка ' + k);
+    for (const k of ['symRU', 'symEN', 'hint', 'kbView']) if (k in v) {
+      requireData(object(v[k]), 'Неверная настройка ' + k);
+      Object.entries(v[k]).forEach(([name, val]) => requireData(k.startsWith('sym') ? typeof val === 'boolean' : mode(name) && (k === 'hint' ? ['full','demand','none'] : ['labels','colors','hidden']).includes(val), 'Неверная настройка ' + k));
+    }
+  } else if (key === 'tt.stats') {
+    obj(); requireData(Object.keys(v).length <= 2000, 'Слишком много символов');
+    for (const [k, s] of Object.entries(v)) {
+      requireData(/^(RU|EN)\|[\s\S]$/u.test(k) && object(s), 'Неверная статистика символа');
+      nums(s, ['a','e','le','se','t','n']);
+      for (const f of ['x','sx']) if (f in s) {
+        requireData(object(s[f]) && Object.keys(s[f]).length <= 100, 'Неверные путаницы');
+        Object.values(s[f]).forEach(n => requireData(number(n), 'Неверный счётчик'));
+      }
+    }
+  } else if (key === 'tt.history') {
+    requireData(Array.isArray(v) && v.length <= 10000, 'Неверная история');
+    v.forEach(h => {
+      requireData(object(h) && mode(h.mode), 'Неверный урок');
+      nums(h, ['t','chars','wpm','acc','errors','layoutErr','shiftErr']);
+      optionalNums(h, ['ms','shiftWarn','fast']);
+      requireData(h.acc <= 100 && h.t <= 8640000000000000, 'Неверные показатели урока');
+      if ('cnt' in h) { requireData(object(h.cnt), 'Неверные счётчики'); Object.values(h.cnt).forEach(n => requireData(number(n), 'Неверный счётчик')); }
+    });
+  } else if (key === 'tt.custom') {
+    obj(); requireData(typeof v.text === 'string' && v.text.length <= 1000000, 'Слишком большой или неверный текст');
+    if ('offset' in v) requireData(Number.isSafeInteger(v.offset) && v.offset >= 0 && v.offset <= v.text.length, 'Неверная позиция текста');
+  } else if (key === 'tt.totals') { obj(); nums(v, ['lessons','ms']); }
+  else if (key === 'tt.days') {
+    obj(); Object.entries(v).forEach(([k,n]) => requireData(/^\d{4}-\d{2}-\d{2}$/.test(k) && number(n), 'Неверный день'));
+  } else if (key === 'tt.daily') {
+    obj(); requireData(typeof v.lastDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v.lastDate) && ['RU','EN'].includes(v.lastLang), 'Неверный дневной план');
+  }
+  return v;
+}
+function readSnapshot() {
+  return Object.fromEntries(USER_KEYS.map(k => [k, window.localStorage.getItem(k)]));
+}
+function validateSnapshot(raw, validateValues) {
+  requireData(object(raw) && Object.keys(raw).length === USER_KEYS.length && USER_KEYS.every(k => Object.hasOwn(raw, k)), 'Копия должна содержать ровно семь пользовательских ключей');
+  for (const k of USER_KEYS) {
+    requireData(raw[k] === null || typeof raw[k] === 'string', 'Неверная запись ' + k);
+    if (validateValues) requireData(raw[k] === null || raw[k].length <= 2000000, 'Слишком большая запись ' + k);
+    if (validateValues && raw[k] !== null) validateRecord(k, JSON.parse(raw[k]));
+  }
+}
+function restoreSnapshot(raw) {
+  for (const k of USER_KEYS) {
+    if (window.localStorage.getItem(k) === raw[k]) continue;
+    if (raw[k] === null) window.localStorage.removeItem(k);
+    else window.localStorage.setItem(k, raw[k]);
+    requireData(window.localStorage.getItem(k) === raw[k], 'Запись не подтверждена: ' + k);
+  }
+}
+function recoverImport() {
+  try {
+    const raw = window.localStorage.getItem(JOURNAL);
+    if (raw === null) return;
+    storageFrozen = true;
+    const journal = JSON.parse(raw);
+    requireData(journal.version === 1, 'Неизвестный журнал восстановления');
+    validateSnapshot(journal.before, false);
+    restoreSnapshot(journal.before);
+    window.localStorage.removeItem(JOURNAL);
+    storageFrozen = false;
+    storageWarnings.add('Незавершённый импорт отменён: прежние данные восстановлены.');
+  } catch (e) {
+    storageFrozen = true;
+    storageWarnings.add('Хранилище недоступно или восстановление не завершено. Запись приостановлена. Освободите место и нажмите «Повторить восстановление». ' + e.message);
+  }
+}
+recoverImport();
+function parseBackup(text) {
+  requireData(new Blob([text]).size <= MAX_BACKUP_BYTES, 'Файл больше 8 МиБ');
+  const b = JSON.parse(text);
+  requireData(object(b) && b.format === 'typing-trainer-backup' && b.version === 1, 'Неподдерживаемый формат или версия резервной копии');
+  requireData(typeof b.exportedAt === 'string' && Number.isFinite(Date.parse(b.exportedAt)), 'Неверная дата копии');
+  validateSnapshot(b.entries, true);
+  return b;
+}
+function backupText() {
+  requireData(!storageFrozen, 'Сначала завершите восстановление хранилища');
+  const entries = readSnapshot();
+  // Include unsaved progress and the memory fallback after a quota error.
+  for (const k of USER_KEYS) if (!protectedKeys.has(k) && (entries[k] === null || store.failedWrites.has(k)) && Object.hasOwn(store.mem, k)) entries[k] = store.mem[k];
+  const live = { 'tt.settings': settings, 'tt.stats': stats, 'tt.history': history, 'tt.totals': totals, 'tt.days': days };
+  for (const [k, value] of Object.entries(live)) if (!protectedKeys.has(k)) entries[k] = JSON.stringify(value);
+  const text = JSON.stringify({ format: 'typing-trainer-backup', version: 1, exportedAt: new Date().toISOString(), entries }, null, 2);
+  requireData(new Blob([text]).size <= MAX_BACKUP_BYTES, 'Копия превышает 8 МиБ');
+  return text;
+}
+function downloadBackup() {
+  const text = backupText();
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+  a.download = 'typing-trainer-backup-' + new Date().toISOString().replace(/[:.]/g, '-') + '.json';
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  return text;
+}
+function replaceData(b, expected) {
+  parseBackup(JSON.stringify(b));
+  requireData(!storageFrozen, 'Сначала завершите восстановление хранилища');
+  const before = readSnapshot();
+  requireData(JSON.stringify(before) === JSON.stringify(expected), 'Данные изменились после просмотра. Выберите файл заново.');
+  requireData(window.localStorage.getItem(JOURNAL) === null, 'Есть незавершённое восстановление');
+  const journal = JSON.stringify({ version: 1, before });
+  storageFrozen = true;
+  let journalStored = false;
+  try {
+    window.localStorage.setItem(JOURNAL, journal);
+    journalStored = true;
+    requireData(window.localStorage.getItem(JOURNAL) === journal, 'Не удалось сохранить журнал');
+    restoreSnapshot(b.entries);
+    window.localStorage.removeItem(JOURNAL);
+  } catch (e) {
+    if (!journalStored) { storageFrozen = false; throw new Error('Импорт не начат: не удалось сохранить журнал. ' + e.message); }
+    try {
+      restoreSnapshot(before);
+      window.localStorage.removeItem(JOURNAL);
+      storageFrozen = false;
+    } catch (rollback) {
+      throw new Error('Импорт не завершён; журнал сохранён. Не продолжайте тренировку. Освободите место и повторите восстановление. ' + rollback.message);
+    }
+    throw new Error('Импорт отменён, прежние данные сохранены. ' + e.message);
+  }
+  // Keep old in-memory state from being written by pagehide before reload.
+}
+
 /* ---------- storage (works without localStorage) ---------- */
 const store = {
   mem: {},
+  failedWrites: new Set(),
   get(k, def) {
     let raw = null;
     try { raw = window.localStorage.getItem(k); } catch (e) { raw = null; }
-    if (raw == null && k in this.mem) raw = this.mem[k];
+    if ((raw == null || this.failedWrites.has(k)) && k in this.mem) raw = this.mem[k];
     if (raw == null) return def;
-    try { return JSON.parse(raw); } catch (e) { return def; }
+    try { return validateRecord(k, JSON.parse(raw)); } catch (e) {
+      protectedKeys.add(k); storageWarnings.add(k + ': повреждённая запись сохранена без изменений. ' + e.message); return def;
+    }
   },
   set(k, v) {
+    if (protectedKeys.has(k)) return false;
     const raw = JSON.stringify(v);
     this.mem[k] = raw;
-    try { window.localStorage.setItem(k, raw); return true; } catch (e) { return false; }
+    if (storageFrozen) return false;
+    try { window.localStorage.setItem(k, raw); this.failedWrites.delete(k); return true; } catch (e) { this.failedWrites.add(k); storageWarnings.add('Не удалось сохранить данные: ' + e.message); showStorageWarnings(); return false; }
   },
   del(k) {
+    if (storageFrozen || protectedKeys.has(k)) return;
     delete this.mem[k];
     try { window.localStorage.removeItem(k); } catch (e) { /* ignore */ }
   },
@@ -1745,6 +1922,45 @@ function onReportClick() {
   } catch (e) { manual(); }
 }
 
+function showStorageWarnings() {
+  const note = document.getElementById('storageNote');
+  if (note) note.textContent = [...storageWarnings].join(' ');
+}
+function initBackup() {
+  let pending = null, expected = null, generation = 0;
+  const message = text => { $('backupMessage').textContent = text; showStorageWarnings(); };
+  const cancel = () => {
+    generation++; pending = expected = null;
+    $('backupPreview').classList.add('hidden'); $('backupConfirm').checked = false;
+    $('backupApply').disabled = true; $('backupFile').value = '';
+  };
+  const download = () => { try { downloadBackup(); if (pending) expected = readSnapshot(); message(protectedKeys.size ? 'Скачана копия исходных записей, включая повреждённые. Для импорта их потребуется исправить; исходники не удалены.' : 'Файл подготовлен. Проверьте, что браузер сохранил загрузку.'); } catch (e) { message(e.message); } };
+  $('backupExport').onclick = download;
+  $('backupBefore').onclick = download;
+  $('backupRecover').onclick = () => location.reload();
+  $('backupCancel').onclick = () => { cancel(); message('Импорт отменён.'); };
+  $('backupConfirm').onchange = () => { $('backupApply').disabled = !$('backupConfirm').checked || !pending; };
+  $('backupFile').onchange = async e => {
+    const file = e.target.files[0]; cancel(); const token = generation;
+    if (!file) return;
+    try {
+      requireData(file.size <= MAX_BACKUP_BYTES, 'Файл больше 8 МиБ');
+      const b = parseBackup(await file.text()); if (token !== generation) return;
+      expected = readSnapshot(); pending = b;
+      const hist = b.entries['tt.history'] === null ? [] : JSON.parse(b.entries['tt.history']);
+      $('backupSummary').textContent = 'Копия от ' + b.exportedAt + '. Уроков в истории: ' + hist.length + '. Будут заменены все семь разделов данных, включая отсутствующие в копии записи. Сохраните текущую копию перед заменой. Закройте другие вкладки тренажёра.';
+      $('backupPreview').classList.remove('hidden'); message('Файл проверен. Замена ещё не выполнена.');
+    } catch (e) { if (token === generation) { cancel(); message('Импорт отклонён: ' + e.message); } }
+  };
+  $('backupApply').onclick = () => {
+    if (!pending || !$('backupConfirm').checked) return;
+    try { replaceData(pending, expected); location.reload(); }
+    catch (e) { cancel(); message(e.message); }
+  };
+  window.addEventListener('storage', e => { if (USER_KEYS.includes(e.key) || e.key === null || e.key === JOURNAL) { cancel(); message('Хранилище изменено в другой вкладке. Перезагрузите страницу перед импортом.'); storageFrozen = true; } });
+  showStorageWarnings();
+}
+
 /* ---------- tabs & init ---------- */
 function setTab(t) {
   tab = t;
@@ -1754,6 +1970,8 @@ function setTab(t) {
 }
 
 function init() {
+  for (const k of USER_KEYS) store.get(k, null);
+  initBackup();
   $('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { setTab(b.dataset.tab); b.blur(); } });
   $('modes').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { stopDaily(); setMode(b.dataset.mode); b.blur(); } });
   $('dailyBtn').onclick = e => { e.currentTarget.blur(); startDaily(); };
@@ -1776,7 +1994,8 @@ function init() {
   $('optIso').onchange = e => { settings.iso = e.target.checked; saveSettings(); buildKeyboard(); update(); };
   $('optDigitsLayout').value = settings.digitsLayout;
   $('optDigitsLayout').onchange = e => { settings.digitsLayout = e.target.value; saveSettings(); if (settings.mode === 'digits') startLesson(); };
-  if (!store.works()) $('storageNote').textContent = 'localStorage недоступен: статистика и настройки не сохранятся после закрытия страницы.';
+  if (!store.works()) storageWarnings.add('localStorage недоступен: статистика и настройки не сохранятся после закрытия страницы.');
+  showStorageWarnings();
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   // after Cmd+Tab no keyup arrives: drop every key that looks held
