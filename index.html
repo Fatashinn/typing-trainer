@@ -900,7 +900,7 @@ function symbolTemplates(L) {
     tp('*', () => '*' + w() + '*'), tp('* 0-9', () => rint(2, 9) + ' * ' + rint(2, 9)),
     tp('/', () => w() + '/' + w()), tp('/ 0-9', () => rint(1, 9) + '/' + rint(2, 9)),
     tp('\\', () => w() + '\\' + w()),
-    tp(',', () => w() + ','), tp(':', () => w() + ':'), tp('-', () => pick(['10-15', '5-7', '2-3'])),
+    tp(',', () => w() + ','), tp(':', () => w() + ':'), tp('- 0-9', () => pick(['10-15', '5-7', '2-3'])),
     tp('0-9', () => String(rint(2, 2030))), tp('. 0-9', () => pad2(rint(1, 28)) + '.' + pad2(rint(1, 12))),
     tp(': 0-9', () => rint(8, 22) + ':' + pick(['00', '15', '30', '45']))
   ];
@@ -928,6 +928,10 @@ function buildSymLesson(L, en, enabled) {
   const W = L === 'RU' ? WORDS_RU : WORDS_EN;
   const dens = Math.min(4, Math.max(1, +settings.density || 2));
   const tpls = symbolTemplates(L).filter(t => t.t.every(tg => en[tg]));
+  // A selected symbol must not depend on an unrelated enabled category.
+  for (const tg of enabled) if (!TERM_TOGGLES.includes(tg) && !tpls.some(t => t.t.includes(tg))) {
+    tpls.push({ t: [tg], f: () => symbolChunk(tg, pick(W)) });
+  }
   const wOf = tg => { const cs = toggleChars(tg); return cs.reduce((a, c) => a + weakness(L, c, g), 0) / cs.length; };
   const tw = tpls.map(t => Math.max(...t.t.map(wOf)));
   const need = new Set(enabled.filter(t => !TERM_TOGGLES.includes(t) && tpls.some(x => x.t.includes(t))));
@@ -975,9 +979,17 @@ function symLessonOk(t, enabled) {
   if (/\.{4,}/.test(t) || /([^\p{L}\p{N}\s])\1/u.test(noEll) || /[,:;][.!?]/.test(t)) return false;
   return enabled.every(tg => tg === '0-9' ? /[0-9]/.test(t) : toggleChars(tg).every(c => (tg === '.' ? noEll : t).includes(c)));
 }
+function symbolChunk(toggle, word) {
+  if (toggle === '0-9') return '12';
+  if (toggle.length === 2) return toggle[0] + word + toggle[1];
+  if (['"', "'", '`'].includes(toggle)) return toggle + word + toggle;
+  if (['#', '@', '$', '№', '~'].includes(toggle)) return toggle + word;
+  return word + toggle;
+}
 function genSymbols(L) {
   const en = settings['sym' + L];
   const enabled = SYM_TOGGLES[L].filter(t => en[t]);
+  if (!enabled.length) return '';
   let best = null;
   for (let i = 0; i < 80; i++) {
     const t = buildSymLesson(L, en, enabled);
@@ -985,7 +997,15 @@ function genSymbols(L) {
     if (t.length >= MIN_LEN && t.length <= MAX_LEN) return t;
     if (t.length <= MAX_LEN && (!best || t.length > best.length)) best = t;
   }
-  return best || buildSymLesson(L, en, enabled);
+  if (best) {
+    while (best.length < MIN_LEN) best += ' ' + pick(L === 'RU' ? WORDS_RU : WORDS_EN);
+    return best;
+  }
+  // Bounded deterministic coverage when random candidates cannot satisfy constraints.
+  const W = L === 'RU' ? WORDS_RU : WORDS_EN;
+  let fallback = enabled.map((tg, i) => capFirst(symbolChunk(tg, W[i % W.length]))).join(' ');
+  while (fallback.length < MIN_LEN) fallback += ' ' + pick(W);
+  return fallback;
 }
 
 /* ---------- weak spots ---------- */
