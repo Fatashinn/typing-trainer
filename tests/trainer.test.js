@@ -197,6 +197,8 @@ const st = page => page.evaluate(() => { const s = window.__tt.state; return { p
     ['Escape', 'F1', 'F12', 'TouchID', 'Fn', 'ControlLeft', 'AltLeft', 'MetaLeft', 'MetaRight', 'AltRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'ArrowRight']
       .every(c => document.querySelector(`[data-code="${c}"]`)) && !document.querySelector('[data-code="IntlBackslash"]')));
 
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+
   // 7. flashes
   const flashOf = (p, code) => p.evaluate(c => { const el = document.querySelector(`[data-code="${c}"]`); return ['ok', 'bad', 'warn'].find(k => el.classList.contains('fl-' + k)) || ''; }, code);
   await page.evaluate(() => { window.__tt.settings.strict = true; window.__tt.load('да; да'); });
@@ -321,6 +323,7 @@ const st = page => page.evaluate(() => { const s = window.__tt.state; return { p
     const dp = await dctx.newPage();
     const derrs = [];
     dp.on('pageerror', e => derrs.push(String(e)));
+    await dp.clock.install();
     await dp.goto(URL);
     await dp.click('[data-mode="symEN"]');
     await dp.evaluate(() => window.__tt.setBlockMs(1200));
@@ -329,9 +332,10 @@ const st = page => page.evaluate(() => { const s = window.__tt.state; return { p
     check('тренировка дня: стартовый экран с блоками', t.includes('Тренировка дня') && t.includes('Цифры → Смешанный') && t.includes('Знаки RU'), t);
     await press(dp, 'Enter', 'Enter');
     let d = await dp.evaluate(() => ({ mode: window.__tt.settings.mode, waiting: window.__tt.daily.waiting, bar: document.getElementById('dailyBar').textContent.replace(/\s+/g, ' ') }));
-    check('Enter запускает блок 1 «Цифры», таймер и прогресс сверху', d.mode === 'digits' && !d.waiting && /блок 1 из 3: Цифры/.test(d.bar) && /осталось \d\d:\d\d/.test(d.bar) && /всего \d+%/.test(d.bar), d);
+    check('Enter запускает блок 1 «Цифры», таймер и прогресс сверху', d.mode === 'digits' && !d.waiting && /блок 1 из 3: Цифры/.test(d.bar) && /осталось активно \d\d:\d\d/.test(d.bar) && /всего \d+%/.test(d.bar), d);
     await typeN(dp, 5);
-    await dp.waitForTimeout(1500);
+    await dp.clock.runFor(1500);
+    await typeN(dp, 1);
     t = await resultText(dp);
     const h1 = await dp.evaluate(() => JSON.parse(localStorage.getItem('tt.history')).slice(-1)[0]);
     check('время блока вышло: экран «Дальше: …»', t.includes('Блок 1 из 3 готов') && t.includes('Дальше: Смешанный'), t);
@@ -340,13 +344,15 @@ const st = page => page.evaluate(() => { const s = window.__tt.state; return { p
     d = await dp.evaluate(() => ({ mode: window.__tt.settings.mode, idx: window.__tt.daily.idx }));
     check('Enter — блок 2 (без данных вместо «Слабых мест» — «Смешанный»)', d.mode === 'mixed' && d.idx === 1, d);
     await typeN(dp, 5);
-    await dp.waitForTimeout(1500);
+    await dp.clock.runFor(1500);
+    await typeN(dp, 1);
     t = await resultText(dp);
     check('после блока 2: «Дальше: Знаки RU»', t.includes('Дальше: Знаки RU'), t);
     await press(dp, 'Enter', 'Enter');
     check('блок 3: «Знаки RU» (первый день начинается с RU)', await dp.evaluate(() => window.__tt.settings.mode) === 'symRU');
     await typeN(dp, 5);
-    await dp.waitForTimeout(1500);
+    await dp.clock.runFor(1500);
+    await typeN(dp, 1);
     t = await resultText(dp);
     check('после блока 3: «Тренировка дня завершена»', t.includes('Тренировка дня завершена') && await dp.evaluate(() => window.__tt.daily === null), t);
     await press(dp, 'Enter', 'Enter');

@@ -134,6 +134,13 @@ textarea { width: 100%; min-height: 90px; background: var(--bg); border: 1px sol
   margin-top: 12px; min-height: 150px; position: relative;
   font-size: 23px; line-height: 1.6; letter-spacing: .02em;
 }
+#practiceStage { min-width: 0; }
+#textBox { max-height: min(45vh, 420px); overflow: auto; scrollbar-gutter: stable; }
+#practiceStage.fitted { height: var(--stage-height); display: flex; flex-direction: column; }
+#practiceStage.fitted #textBox { flex: 1 1 auto; min-height: 120px; max-height: none; }
+#practiceStage.fitted #status, #practiceStage.fitted #hint { flex: 0 0 auto; }
+#practiceStage.fitted #hint { max-height: 72px; overflow: auto; }
+#practiceStage.fitted #kbWrap { flex: 0 0 auto; width: min(100%, var(--keyboard-width)); margin-inline: auto; }
 #text { white-space: pre-wrap; overflow-wrap: break-word; }
 #text span.d { color: var(--done); }
 #text span.rep { background: var(--rep-bg); }
@@ -264,6 +271,7 @@ h2:first-child { margin-top: 0; }
       </div>
       <div class="row" style="gap:8px">
       <button id="newBtn" title="Esc">Новый текст</button>
+      <button id="pauseBtn" aria-pressed="false">Пауза</button>
       <label class="quick">Подсказка
         <select id="hintSel" data-quick="1">
           <option value="full">полная</option>
@@ -280,6 +288,7 @@ h2:first-child { margin-top: 0; }
     </div>
     <div id="modeOpts"></div>
     <div class="panel hidden" id="dailyBar"></div>
+    <div id="practiceStage">
     <div class="panel" id="textBox">
       <div id="text"></div>
       <div id="result" class="hidden"></div>
@@ -287,6 +296,7 @@ h2:first-child { margin-top: 0; }
     <div id="status"><span id="msg"></span><span id="live"></span></div>
     <div id="kbWrap"><div id="kbCase"><div id="kb"></div></div></div>
     <div id="hint"></div>
+    </div>
   </section>
 
   <section id="tab-stats" class="hidden">
@@ -398,14 +408,28 @@ function validateRecord(key, v) {
     v.forEach(h => {
       requireData(object(h) && mode(h.mode), 'Неверный урок');
       nums(h, ['t','chars','wpm','acc','errors','layoutErr','shiftErr']);
-      optionalNums(h, ['ms','shiftWarn','fast']);
+      optionalNums(h, ['ms','shiftWarn','fast','activeMs','wpmMs','longBreaks']);
+      if ('timingVersion' in h) {
+        requireData(h.timingVersion === 2 && typeof h.id === 'string' && ['completed','interrupted','block-ended'].includes(h.status), 'Неверная версия времени урока');
+        nums(h, ['activeMs','wpmMs','longBreaks']);
+        requireData(h.activeMs <= h.wpmMs && typeof h.noSpeedSample === 'boolean', 'Неверные временные показатели');
+      }
       requireData(h.acc <= 100 && h.t <= 8640000000000000, 'Неверные показатели урока');
       if ('cnt' in h) { requireData(object(h.cnt), 'Неверные счётчики'); Object.values(h.cnt).forEach(n => requireData(number(n), 'Неверный счётчик')); }
     });
   } else if (key === 'tt.custom') {
     obj(); requireData(typeof v.text === 'string' && v.text.length <= 1000000, 'Слишком большой или неверный текст');
     if ('offset' in v) requireData(Number.isSafeInteger(v.offset) && v.offset >= 0 && v.offset <= v.text.length, 'Неверная позиция текста');
-  } else if (key === 'tt.totals') { obj(); nums(v, ['lessons','ms']); }
+  } else if (key === 'tt.totals') {
+    obj(); nums(v, ['lessons','ms']);
+    if ('timingV2' in v) {
+      const l = v.timingV2;
+      requireData(object(l) && l.version === 1 && number(l.activeMs), 'Неверный журнал активного времени');
+      validateRecord('tt.days', l.legacyDays); validateRecord('tt.days', l.activeDays);
+      if ('pending' in l) validateRecord('tt.history', [l.pending]);
+      if ('records' in l) validateRecord('tt.history', l.records);
+    }
+  }
   else if (key === 'tt.days') {
     obj(); Object.entries(v).forEach(([k,n]) => requireData(/^\d{4}-\d{2}-\d{2}$/.test(k) && number(n), 'Неверный день'));
   } else if (key === 'tt.daily') {
@@ -885,7 +909,7 @@ function symbolTemplates(L) {
     tp('*', () => '*' + w() + '*'), tp('* 0-9', () => rint(2, 9) + ' * ' + rint(2, 9)),
     tp('/', () => w() + '/' + w()), tp('/ 0-9', () => rint(1, 9) + '/' + rint(2, 9)),
     tp('\\', () => w() + '\\' + w()),
-    tp(',', () => w() + ','), tp(':', () => w() + ':'), tp('-', () => pick(['10-15', '5-7', '2-3'])),
+    tp(',', () => w() + ','), tp(':', () => w() + ':'), tp('- 0-9', () => pick(['10-15', '5-7', '2-3'])),
     tp('0-9', () => String(rint(2, 2030))), tp('. 0-9', () => pad2(rint(1, 28)) + '.' + pad2(rint(1, 12))),
     tp(': 0-9', () => rint(8, 22) + ':' + pick(['00', '15', '30', '45']))
   ];
@@ -913,6 +937,10 @@ function buildSymLesson(L, en, enabled) {
   const W = L === 'RU' ? WORDS_RU : WORDS_EN;
   const dens = Math.min(4, Math.max(1, +settings.density || 2));
   const tpls = symbolTemplates(L).filter(t => t.t.every(tg => en[tg]));
+  // A selected symbol must not depend on an unrelated enabled category.
+  for (const tg of enabled) if (!TERM_TOGGLES.includes(tg) && !tpls.some(t => t.t.includes(tg))) {
+    tpls.push({ t: [tg], f: () => symbolChunk(tg, pick(W)) });
+  }
   const wOf = tg => { const cs = toggleChars(tg); return cs.reduce((a, c) => a + weakness(L, c, g), 0) / cs.length; };
   const tw = tpls.map(t => Math.max(...t.t.map(wOf)));
   const need = new Set(enabled.filter(t => !TERM_TOGGLES.includes(t) && tpls.some(x => x.t.includes(t))));
@@ -960,9 +988,17 @@ function symLessonOk(t, enabled) {
   if (/\.{4,}/.test(t) || /([^\p{L}\p{N}\s])\1/u.test(noEll) || /[,:;][.!?]/.test(t)) return false;
   return enabled.every(tg => tg === '0-9' ? /[0-9]/.test(t) : toggleChars(tg).every(c => (tg === '.' ? noEll : t).includes(c)));
 }
+function symbolChunk(toggle, word) {
+  if (toggle === '0-9') return '12';
+  if (toggle.length === 2) return toggle[0] + word + toggle[1];
+  if (['"', "'", '`'].includes(toggle)) return toggle + word + toggle;
+  if (['#', '@', '$', '№', '~'].includes(toggle)) return toggle + word;
+  return word + toggle;
+}
 function genSymbols(L) {
   const en = settings['sym' + L];
   const enabled = SYM_TOGGLES[L].filter(t => en[t]);
+  if (!enabled.length) return '';
   let best = null;
   for (let i = 0; i < 80; i++) {
     const t = buildSymLesson(L, en, enabled);
@@ -970,7 +1006,15 @@ function genSymbols(L) {
     if (t.length >= MIN_LEN && t.length <= MAX_LEN) return t;
     if (t.length <= MAX_LEN && (!best || t.length > best.length)) best = t;
   }
-  return best || buildSymLesson(L, en, enabled);
+  if (best) {
+    while (best.length < MIN_LEN) best += ' ' + pick(L === 'RU' ? WORDS_RU : WORDS_EN);
+    return best;
+  }
+  // Bounded deterministic coverage when random candidates cannot satisfy constraints.
+  const W = L === 'RU' ? WORDS_RU : WORDS_EN;
+  let fallback = enabled.map((tg, i) => capFirst(symbolChunk(tg, W[i % W.length]))).join(' ');
+  while (fallback.length < MIN_LEN) fallback += ' ' + pick(W);
+  return fallback;
 }
 
 /* ---------- weak spots ---------- */
@@ -1043,20 +1087,24 @@ function normalizeText(s) {
     .split('').filter(typeable).join('')
     .replace(/ {2,}/g, ' ').trim();
 }
+let customChunk = null;
 function genCustom() {
+  customChunk = null;
   const c = store.get(K_CUSTOM, { text: '', offset: 0 });
   const t = normalizeText(c.text || '');
   if (!t) return '';
   let off = c.offset || 0;
   if (off >= t.length) off = 0;
+  while (t[off] === ' ') off++;
   let end = Math.min(t.length, off + MAX_LEN);
   if (end < t.length) {
     const sp = t.lastIndexOf(' ', end);
     if (sp > off + MIN_LEN / 2) end = sp;
   }
-  const chunk = t.slice(off, end).trim();
-  c.offset = end >= t.length ? 0 : end + 1;
-  store.set(K_CUSTOM, c);
+  const chunk = t.slice(off, end).trimEnd();
+  let next = end;
+  while (t[next] === ' ') next++;
+  customChunk = { start: off, next: next >= t.length ? 0 : next, length: chunk.length, source: c.text };
   return chunk;
 }
 
@@ -1095,11 +1143,151 @@ function armReveal() {
   }, REVEAL_MS);
 }
 
+/* ---------- event-based practice time ---------- */
+const IDLE_TIMEOUT_MS = 5000;
+let manualPause = false;
+let windowAway = false;
+function timingLedger() {
+  if (!totals.timingV2) totals.timingV2 = { version: 1, legacyDays: { ...days }, activeDays: {}, activeMs: 0 };
+  return totals.timingV2;
+}
+function publishDays() {
+  const ledger = timingLedger();
+  days = { ...ledger.legacyDays };
+  for (const [day, ms] of Object.entries(ledger.activeDays)) days[day] = (days[day] || 0) + ms;
+}
+function allocatePractice(start, duration) {
+  const ledger = timingLedger();
+  let cursor = start, left = duration;
+  while (left > 0) {
+    const d = new Date(cursor);
+    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+    const take = Math.min(left, midnight - cursor);
+    const key = dayKey(cursor);
+    ledger.activeDays[key] = (ledger.activeDays[key] || 0) + take;
+    cursor += take; left -= take;
+  }
+  ledger.activeMs += duration;
+  publishDays();
+}
+function timeSnapshot(status = 'interrupted') {
+  return {
+    id: S.id, timingVersion: 2, status, t: Date.now(), mode: S.mode,
+    chars: S.pos, keys: S.keys, wpm: lessonSpeed(), acc: S.keys ? Math.round(1000 * S.correct / S.keys) / 10 : 100,
+    ms: Math.round(S.wpmMs), wpmMs: Math.round(S.wpmMs), activeMs: Math.round(S.activeMs),
+    longBreaks: S.longBreaks, errors: S.errors, layoutErr: S.layoutErr,
+    shiftErr: S.shiftErr, shiftWarn: S.shiftWarn, fast: S.fastWords,
+    noSpeedSample: !speedSample(), cnt: countSyms(S.text.slice(0, S.pos))
+  };
+}
+function speedSample() { return S.pos - S.fastChars > 0 && S.wpmMs - S.fastMs > 0; }
+function lessonSpeed() {
+  return speedSample() ? Math.round((S.pos - S.fastChars) / 5 / ((S.wpmMs - S.fastMs) / 60000)) : 0;
+}
+function checkpointTime() {
+  saveCustomProgress();
+  if (!S || !S.keys || S.recorded) return;
+  timingLedger().pending = timeSnapshot();
+  // One authoritative key contains both the checkpoint and its already credited time.
+  store.set(K_TOTALS, totals);
+}
+function appendTimedRecord(record) {
+  if (!history.some(h => h.id === record.id)) history.push(record);
+  if (history.length > 50) history = history.slice(-50);
+}
+function recoverPractice() {
+  if (!totals.timingV2) return;
+  const ledger = timingLedger();
+  publishDays();
+  if (ledger.pending) {
+    const record = { ...ledger.pending, status: 'interrupted' };
+    ledger.records = [...(ledger.records || []), record].slice(-50);
+    delete ledger.pending;
+    totals.lessons++;
+    totals.ms += record.ms;
+  }
+  if (ledger.records?.length) {
+    // Persist the decision before publishing history; replay by id is idempotent.
+    if (!store.set(K_TOTALS, totals)) return;
+    ledger.records.forEach(appendTimedRecord);
+    if (store.set(K_HIST, history)) {
+      delete ledger.records;
+      store.set(K_TOTALS, totals);
+    }
+  }
+  store.set(K_DAYS, days);
+}
+function suspendPractice() {
+  if (!S || S.done || S.anchorMono == null) return;
+  const delta = Math.max(0, performance.now() - S.anchorMono);
+  S.wpmMs += delta;
+  S.anchorMono = S.anchorWall = null;
+  S.skipLatency = true;
+  S.pauseStartedWall = Date.now();
+  checkpointTime();
+  renderLive();
+}
+function practiceAvailable() {
+  return !manualPause && !windowAway && !document.hidden && tab === 'train' && !isTextField(document.activeElement)
+    && !document.activeElement?.closest('#modeOpts details[open]');
+}
+function contentTime() {
+  const mono = performance.now(), wall = Date.now();
+  S.previousWpmMs = S.wpmMs;
+  if (S.pauseStartedWall != null) {
+    if (wall - S.pauseStartedWall > IDLE_TIMEOUT_MS) S.longBreaks++;
+    S.pauseStartedWall = null;
+  }
+  if (S.anchorMono != null) {
+    const elapsed = Math.max(0, mono - S.anchorMono);
+    const wallElapsed = Math.max(0, wall - S.anchorWall);
+    // A stopped monotonic clock (sleep on some platforms) is an explicit break.
+    const clockBreak = Math.abs(wallElapsed - elapsed) > 2000;
+    let active = clockBreak ? 0 : Math.min(IDLE_TIMEOUT_MS, elapsed);
+    let wpm = clockBreak ? 0 : elapsed;
+    if (elapsed > IDLE_TIMEOUT_MS || clockBreak) S.longBreaks++;
+    if (daily && !daily.waiting) {
+      const left = Math.max(0, BLOCK_MS - daily.blockMs);
+      if (active >= left) active = left;
+    }
+    S.activeMs += active; S.wpmMs += wpm;
+    if (active) allocatePractice(S.anchorWall, active);
+    if (daily && !daily.waiting) daily.blockMs += active;
+  }
+  S.anchorMono = mono; S.anchorWall = wall;
+  if (daily && !daily.waiting && daily.blockMs >= BLOCK_MS) {
+    checkpointTime(); endBlock(); return false;
+  }
+  return true;
+}
+function pauseButton() {
+  if (!manualPause) suspendPractice();
+  manualPause = !manualPause;
+  $('pauseBtn').textContent = manualPause ? 'Продолжить' : 'Пауза';
+  $('pauseBtn').setAttribute('aria-pressed', String(manualPause));
+  renderLive();
+}
+
+function saveCustomProgress() {
+  if (!S?.custom || !S.keys) return;
+  const c = store.get(K_CUSTOM, { text: '', offset: 0 });
+  if (c.text !== S.custom.source) return;
+  const originalCount = S.pos - [...S.sourceInserted].filter(i => i < S.pos).length;
+  const offset = originalCount >= S.custom.length ? S.custom.next : S.custom.start + originalCount;
+  if (c.offset !== offset) store.set(K_CUSTOM, { ...c, offset });
+}
 function startLesson(text) {
-  text = text == null ? generate(settings.mode) : text;
+  if (S && !S.done && !S.recorded && S.keys) recordLesson("interrupted");
+  manualPause = false;
+  $("pauseBtn").textContent = "Пауза";
+  $("pauseBtn").setAttribute("aria-pressed", "false");
+  const generated = text == null;
+  text = generated ? generate(settings.mode) : text;
   S = {
-    mode: settings.mode, text, layouts: assignLayouts(text, fallbackLayout(settings.mode)),
+    mode: settings.mode, text, custom: generated && settings.mode === "custom" ? customChunk : null, sourceInserted: new Set(), layouts: assignLayouts(text, fallbackLayout(settings.mode)),
     pos: 0, startT: 0, lastT: 0, done: false,
+    id: crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random(),
+    activeMs: 0, wpmMs: 0, longBreaks: 0, anchorMono: null, anchorWall: null, recorded: false, wStartMs: 0,
     keys: 0, correct: 0, errors: 0, layoutErr: 0, shiftErr: 0, shiftWarn: 0,
     posErr: false, posLayout: false, posShift: false, errAt: new Set(), sinceSave: 0,
     // words: start of the current word, its error flag; repeats and too-fast words by char index
@@ -1146,6 +1334,7 @@ function renderText() {
     frag.appendChild(sp);
   }
   box.appendChild(frag);
+  S.lastScrolledPos = -1;
 }
 
 function setMsg(text, kind) {
@@ -1169,13 +1358,15 @@ function update() {
   renderKeyboard(L);
   highlightNext();
   renderLive();
+  scrollCurrent();
 }
 
 function renderLive() {
   const acc = S.keys ? Math.round(100 * S.correct / S.keys) : 100;
-  const el = S.startT && S.lastT > S.startT ? (S.lastT - S.startT) / 60000 : 0;
-  const wpm = el && S.pos >= 10 ? Math.round(S.pos / 5 / el) : '–';
-  $('live').textContent = `раскладка: ${settings.lastLayout} · ${wpm} wpm · ${acc}% · ${S.pos}/${S.text.length}`;
+  const wpm = S.pos >= 10 && speedSample() ? lessonSpeed() : '–';
+  const paused = manualPause || windowAway || document.hidden || tab !== 'train';
+  const idle = S.anchorMono != null && performance.now() - S.anchorMono > IDLE_TIMEOUT_MS;
+  $('live').textContent = `активно ${mmss(Math.floor(S.activeMs / 1000) * 1000)} · ${paused ? 'пауза · ' : idle ? 'ожидание · ' : ''}${wpm} wpm · ${acc}% · ${S.pos}/${S.text.length}`;
 }
 
 /* ---------- keyboard ---------- */
@@ -1331,7 +1522,12 @@ function onKeyDown(e) {
   if (e.key.length !== 1 && e.key !== 'Dead') return;
   e.preventDefault();
   if (e.repeat || !S.text || S.pos >= S.text.length) return;
+  if (!practiceAvailable()) return;
+  if (!contentTime()) return;
   handleChar(e);
+  checkpointTime();
+  renderDailyBar();
+  renderStreak();
 }
 function onKeyUp(e) {
   trackKeyUp(e);
@@ -1423,21 +1619,22 @@ function miss(text, kind) {
 
 function advance(now, statLayout) {
   const ch = S.text[S.pos];
-  if (ch !== ' ' && (S.pos === 0 || S.text[S.pos - 1] === ' ')) { S.wStartPos = S.pos; S.wStartT = S.pos === 0 ? now : S.lastT; }
+  if (ch !== ' ' && (S.pos === 0 || S.text[S.pos - 1] === ' ')) S.wStartPos = S.pos;
   const st = statOf(statLayout, ch);
   st.a++;
   if (S.posErr) st.e++;
   if (S.posLayout) st.le++;
   if (S.posShift) st.se++;
   const dt = now - S.lastT;
-  if (S.pos > 0 && dt > 0 && dt <= 2000) { st.t += dt; st.n++; }
+  if (!S.skipLatency && S.pos > 0 && dt > 0 && dt <= 2000) { st.t += dt; st.n++; }
+  S.skipLatency = false;
   S.lastT = now;
   S.correct++;
   S.pos++;
   S.posErr = S.posLayout = S.posShift = false;
-  if (ch === ' ') S.wordErr = false;
+  if (ch === ' ') { S.wordErr = false; S.wStartMs = S.previousWpmMs || 0; }
   else if (S.pos >= S.text.length || S.text[S.pos] === ' ') wordDone(now);
-  if (++S.sinceSave >= 25) { S.sinceSave = 0; saveStats(); }
+  if (++S.sinceSave >= 25) { S.sinceSave = 0; store.set(K_STATS, stats); }
   if (S.pos >= S.text.length) return finish();
   armReveal();
   update();
@@ -1447,8 +1644,8 @@ function advance(now, statLayout) {
 function wordDone(now) {
   const start = S.wStartPos, end = S.pos;
   let changed = false;
-  const chars = start === 0 ? end - start - 1 : end - start;
-  const dur = now - S.wStartT;
+  const chars = end - start + (start > 0 ? 1 : 0);
+  const dur = S.wpmMs - S.wStartMs;
   const ceil = +settings.ceiling || 0;
   if (ceil && chars > 0 && dur > 0 && chars / 5 / (dur / 60000) > ceil) {
     for (let i = start; i < end; i++) S.fast.add(i);
@@ -1463,6 +1660,8 @@ function wordDone(now) {
     for (let k = 0; k < n; k++) { ins += ' ' + word; insL = insL.concat(lays); }
     const shift = set => new Set([...set].map(i => i >= end ? i + ins.length : i));
     S.errAt = shift(S.errAt); S.fast = shift(S.fast); S.rep = shift(S.rep);
+    S.sourceInserted = shift(S.sourceInserted);
+    for (let k = 0; k < ins.length; k++) S.sourceInserted.add(end + k);
     S.text = S.text.slice(0, end) + ins + S.text.slice(end);
     S.layouts.splice(end, 0, ...insL);
     for (let k = 0; k < ins.length; k++) if (ins[k] !== ' ') S.rep.add(end + k);
@@ -1485,25 +1684,20 @@ function countSyms(text) {
 }
 
 // store the lesson (also a partly typed one when a daily block runs out of time)
-function recordLesson() {
-  const ms = Math.max(0, Math.round(S.lastT - S.startT));
-  const effChars = S.pos - S.fastChars, effMs = ms - S.fastMs;
-  const wpm = effChars > 0 && effMs > 0 ? Math.round(effChars / 5 / (effMs / 60000)) : 0;
-  const acc = S.keys ? Math.round(1000 * S.correct / S.keys) / 10 : 100;
-  history.push({
-    t: Date.now(), mode: S.mode, chars: S.pos, wpm, acc, ms,
-    errors: S.errors, layoutErr: S.layoutErr, shiftErr: S.shiftErr, shiftWarn: S.shiftWarn,
-    fast: S.fastWords, cnt: countSyms(S.text.slice(0, S.pos))
-  });
-  if (history.length > 50) history = history.slice(-50);
-  totals.lessons++;
-  totals.ms += ms;
-  const dk = dayKey(Date.now());
-  days[dk] = (days[dk] || 0) + ms;
-  if (daily && !daily.waiting) daily.blockMs += ms;
-  saveStats();
+function recordLesson(status = 'completed') {
+  saveCustomProgress();
+  if (S.recorded) return { wpm: lessonSpeed(), acc: S.keys ? Math.round(1000 * S.correct / S.keys) / 10 : 100 };
+  const record = timeSnapshot(status);
+  S.recorded = true; S.anchorMono = S.anchorWall = null;
+  const ledger = timingLedger();
+  delete ledger.pending; ledger.records = [...(ledger.records || []), record].slice(-50);
+  totals.lessons++; totals.ms += record.ms;
+  const saved = store.set(K_TOTALS, totals);
+  appendTimedRecord(record);
+  store.set(K_STATS, stats); store.set(K_DAYS, days);
+  if (saved && store.set(K_HIST, history)) { delete ledger.records; store.set(K_TOTALS, totals); }
   renderStreak();
-  return { wpm, acc };
+  return { wpm: record.noSpeedSample ? '–' : record.wpm, acc: record.acc };
 }
 
 function finish() {
@@ -1552,22 +1746,22 @@ function shiftDay(key, delta) {
 }
 function streakInfo() {
   const today = dayKey(Date.now()), yest = shiftDay(today, -1);
-  const ok = k => (days[k] || 0) >= DAY_GOAL_MS;
+  const ledger = totals.timingV2;
+  const ok = k => ledger ? (ledger.legacyDays[k] || 0) >= DAY_GOAL_MS || (ledger.activeDays[k] || 0) >= DAY_GOAL_MS : (days[k] || 0) >= DAY_GOAL_MS;
   let n = 0, k = ok(today) ? today : yest;
   while (ok(k)) { n++; k = shiftDay(k, -1); }
   const earlier = Object.keys(days).some(x => x < yest && days[x] > 0);
-  return { streak: n, todayMs: days[today] || 0, yestMs: days[yest] || 0, missedYesterday: !ok(yest) && earlier };
+  return { streak: n, todayMs: ledger ? ledger.activeDays[today] || 0 : 0, yestMs: ledger ? ledger.activeDays[yest] || 0 : 0, legacyTodayMs: ledger ? ledger.legacyDays[today] || 0 : days[today] || 0, missedYesterday: !ok(yest) && earlier };
 }
 function renderStreak() {
   const si = streakInfo();
   $('streak').innerHTML = `Дней подряд: <b>${si.streak}</b> · сегодня ${Math.floor(si.todayMs / 60000)} из 10 мин` +
+    (si.legacyTodayMs ? ' · есть историческая оценка времени' : '') +
     (si.missedYesterday ? ' · <span class="miss">вчера пропущено</span>' : '');
 }
 function dailyElapsed() {
   if (!daily) return 0;
-  let cur = 0;
-  if (!daily.waiting && S && S.startT && !S.done) cur = Math.max(0, Math.min(performance.now(), S.lastT + 5000) - S.startT);
-  return daily.blockMs + cur;
+  return daily.blockMs;
 }
 const mmss = ms => { const t = Math.max(0, Math.ceil(ms / 1000)); return `${pad2(Math.floor(t / 60))}:${pad2(t % 60)}`; };
 function renderDailyBar() {
@@ -1577,18 +1771,19 @@ function renderDailyBar() {
   const el = Math.min(BLOCK_MS, dailyElapsed()), b = daily.blocks[Math.min(daily.idx, daily.blocks.length - 1)];
   const total = Math.min(100, Math.round(100 * (Math.min(daily.idx, daily.blocks.length) * BLOCK_MS + (daily.waiting ? 0 : el)) / (daily.blocks.length * BLOCK_MS)));
   bar.innerHTML = `<div class="row"><span><b>Тренировка дня</b> · блок ${Math.min(daily.idx + 1, daily.blocks.length)} из ${daily.blocks.length}: ${b.label}</span>
-    <span>осталось <span class="t">${daily.waiting ? mmss(BLOCK_MS) : mmss(BLOCK_MS - el)}</span></span>
+    <span>осталось активно <span class="t">${daily.waiting ? mmss(BLOCK_MS) : mmss(BLOCK_MS - el)}</span></span>
     <span class="muted">всего ${total}%</span><button id="dailyStop" style="margin-left:auto">Прервать</button></div>
     <div class="bar"><div style="width:${total}%"></div></div>`;
   $('dailyStop').onclick = e => { e.currentTarget.blur(); stopDaily(); startLesson(); };
 }
 function dailyTick() {
   if (!daily) return;
-  if (!daily.waiting && dailyElapsed() >= BLOCK_MS) endBlock();
+  renderLive();
   renderDailyBar();
 }
 function startDaily() {
   stopDaily();
+  if (S && !S.done && S.keys) recordLesson("interrupted");
   const today = dayKey(Date.now());
   const d = store.get(K_DAILY, {});
   const lang = d.lastDate === today ? d.lastLang : (d.lastLang === 'RU' ? 'EN' : 'RU');
@@ -1601,7 +1796,7 @@ function startDaily() {
   daily.timer = setInterval(dailyTick, 250);
   renderDailyBar();
   showScreen(`<div class="big" style="font-size:24px">Тренировка дня</div>
-    <p>${daily.blocks.map(b => b.label).join(' → ')}, по 5 минут.<br><span class="muted small">Время идёт, только пока печатаешь.</span></p>`, startBlock);
+    <p>${daily.blocks.map(b => b.label).join(' → ')}, по 5 минут.<br><span class="muted small">Считаются интервалы между нажатиями, до 5 секунд. Пауза и ожидание между блоками не учитываются.</span></p>`, startBlock);
 }
 function startBlock() {
   daily.waiting = false;
@@ -1610,7 +1805,7 @@ function startBlock() {
   renderDailyBar();
 }
 function endBlock() {
-  if (S && !S.done && S.startT && S.pos > 0) { S.done = true; recordLesson(); }
+  if (S && !S.done && S.keys) { S.done = true; recordLesson("block-ended"); }
   daily.waiting = true;
   daily.idx++;
   if (daily.idx < daily.blocks.length) {
@@ -1629,6 +1824,7 @@ function endBlock() {
 }
 function stopDaily() {
   if (!daily) return;
+  if (S && !S.done && S.keys) { recordLesson("interrupted"); S.done = true; }
   clearInterval(daily.timer);
   daily = null;
   renderDailyBar();
@@ -1748,12 +1944,12 @@ function renderStats() {
   const h = $('histTable');
   if (!history.length) h.innerHTML = '<tr><td class="muted">Пока нет уроков.</td></tr>';
   else {
-    h.innerHTML = '<tr><th>Когда</th><th>Режим</th><th>Знаков</th><th>wpm</th><th>Точность</th><th>Ошибок</th><th>Раскладка</th><th>Shift</th></tr>';
+    h.innerHTML = '<tr><th>Когда</th><th>Режим</th><th>Статус</th><th>Активно</th><th>Знаков</th><th>wpm</th><th>Точность</th><th>Ошибок</th><th>Раскладка</th><th>Shift</th></tr>';
     history.slice().reverse().forEach(x => {
       const tr = document.createElement('tr');
       const d = new Date(x.t);
       const when = `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-      [when, MODE_NAMES[x.mode] || x.mode, x.chars, x.wpm, String(x.acc).replace('.', ',') + '%', x.errors, x.layoutErr,
+      [when, MODE_NAMES[x.mode] || x.mode, x.timingVersion === 2 ? ({completed:'завершён',interrupted:'прерван','block-ended':'конец блока'}[x.status]) : 'исторический', x.activeMs != null ? mmss(Math.floor(x.activeMs / 1000) * 1000) : '—', x.chars, x.noSpeedSample ? '—' : x.wpm, String(x.acc).replace('.', ',') + '%', x.errors, x.layoutErr,
         x.shiftErr + (x.shiftWarn ? ` (+${x.shiftWarn})` : '')].forEach(c => {
         const td = document.createElement('td'); td.textContent = c; tr.appendChild(td);
       });
@@ -1810,8 +2006,8 @@ function buildReport(lim) {
   const mins = ms => Math.round(ms / 60000);
   out.push(`# Тренажёр знаков: отчёт ${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`);
   out.push(`Раскладки: Russian – PC и English (US), MacBook. Клавиши указаны по US-маркировке; Shift нужен противоположной рукой.`);
-  out.push(`Уроков всего: ${totals.lessons} (~${mins(totals.ms)} мин); за 7 дней: ${week.length} (~${mins(week.reduce((a, x) => a + lessonMs(x), 0))} мин).`);
-  if (totals.lessons < 5) out.push(`Данных мало: меньше 5 уроков, выводы предварительные.`);
+  out.push(`Уроков всего: ${totals.lessons} (~${mins(totals.ms)} мин по старому/урочному учёту; активно после обновления ${mins(totals.timingV2?.activeMs || 0)} мин); за 7 дней: ${week.length} (~${mins(week.reduce((a, x) => a + lessonMs(x), 0))} мин).`);
+  if (history.filter(x => !x.timingVersion || x.status === 'completed').length < 5) out.push(`Данных мало: меньше 5 завершённых уроков в доступной истории, выводы предварительные.`);
   out.push('', '## Настройки');
   out.push(`Строгий Shift: ${settings.strict ? 'вкл' : 'выкл'}. Клавиатура ${settings.iso ? 'ISO' : 'ANSI'}. ` +
     `Потолок скорости: ${+settings.ceiling ? settings.ceiling + ' wpm' : 'выкл'}. Перепечатка слова с ошибкой: ${+settings.retype ? settings.retype + ' раза' : 'выкл'}. Плотность знаков: в каждом ${settings.density}-м слове.`);
@@ -1824,11 +2020,11 @@ function buildReport(lim) {
   const today = dayKey(now);
   out.push('Минуты за 7 дней: ' + [6, 5, 4, 3, 2, 1, 0].map(k => { const dk = shiftDay(today, -k); return `${dk.slice(8)}.${dk.slice(5, 7)} ${mins(days[dk] || 0)}`; }).join(', ') + '.');
 
-  out.push('', '## Режимы: последние 10 уроков (предыдущие 10)');
+  out.push('', '## Режимы: последние 10 завершённых уроков (предыдущие 10)');
   const avg = (arr, f) => arr.reduce((a, x) => a + f(x), 0) / arr.length;
   let anyMode = false;
   Object.keys(MODE_NAMES).forEach(m => {
-    const hs = history.filter(x => x.mode === m);
+    const hs = history.filter(x => x.mode === m && (!x.timingVersion || x.status === 'completed') && !x.noSpeedSample);
     if (!hs.length) return;
     anyMode = true;
     const last = hs.slice(-10), prev = hs.slice(-20, -10);
@@ -1894,7 +2090,7 @@ function buildReport(lim) {
   if (!history.length) out.push('Пока нет.');
   history.slice(-lim.lessons).reverse().forEach(x => out.push(
     `${ddmm(x.t)} ${MODE_NAMES[x.mode] || x.mode}: ${x.wpm} wpm, ${fmt1(x.acc)}%, раскладка ${x.layoutErr}, Shift ${x.shiftErr}` +
-    (x.fast ? `, быстрых слов ${x.fast}` : '')));
+    (x.fast ? `, быстрых слов ${x.fast}` : '') + (x.timingVersion ? `, ${x.status}, активно ${Math.round(x.activeMs / 1000)} с` : ', историческая оценка')));
   return out.join('\n');
 }
 // keep the report under ~3000 chars by shortening the lists
@@ -1920,6 +2116,34 @@ function onReportClick() {
     if (!navigator.clipboard || !navigator.clipboard.writeText) return manual();
     navigator.clipboard.writeText(text).then(ok, manual);
   } catch (e) { manual(); }
+}
+
+function scrollCurrent(force = false) {
+  if (!S || S.done || (!force && S.lastScrolledPos === S.pos)) return;
+  const current = $('text').children[S.pos], box = $('textBox');
+  if (!current) return;
+  S.lastScrolledPos = S.pos;
+  const r = current.getBoundingClientRect(), frame = box.getBoundingClientRect();
+  const scale = frame.width / box.offsetWidth || 1;
+  if (r.top < frame.top + 12) box.scrollTop -= (frame.top + 12 - r.top) / scale;
+  else if (r.bottom > frame.bottom - 12) box.scrollTop += (r.bottom - frame.bottom + 12) / scale;
+}
+function fitPractice() {
+  if (tab !== 'train') return;
+  const stage = $('practiceStage');
+  const scale = stage.getBoundingClientRect().width / stage.offsetWidth || 1;
+  const available = Math.floor((innerHeight - (stage.getBoundingClientRect().top + scrollY) - 16) / scale);
+  const fitted = innerWidth / scale >= 640 && available >= 480;
+  stage.classList.toggle('fitted', fitted);
+  stage.style.setProperty('--stage-height', available + 'px');
+  stage.style.setProperty('--keyboard-width', Math.max(0, (available - 220) * 14.5 / 6) + 'px');
+  scrollCurrent(true);
+}
+function initPracticeLayout() {
+  const observer = new ResizeObserver(() => requestAnimationFrame(fitPractice));
+  for (const el of [document.querySelector('header'), $('modeOpts'), $('dailyBar'), $('modes').parentElement]) observer.observe(el);
+  window.addEventListener('resize', fitPractice);
+  requestAnimationFrame(fitPractice);
 }
 
 function showStorageWarnings() {
@@ -1963,15 +2187,22 @@ function initBackup() {
 
 /* ---------- tabs & init ---------- */
 function setTab(t) {
+  if (t !== tab) suspendPractice();
   tab = t;
   for (const b of $('tabs').children) b.setAttribute('aria-pressed', String(b.dataset.tab === t));
   ['train', 'stats', 'settings'].forEach(x => $('tab-' + x).classList.toggle('hidden', x !== t));
   if (t === 'stats') renderStats();
+  requestAnimationFrame(fitPractice);
 }
 
 function init() {
   for (const k of USER_KEYS) store.get(k, null);
+  recoverPractice();
   initBackup();
+  initPracticeLayout();
+  $("pauseBtn").onclick = e => { e.currentTarget.blur(); pauseButton(); };
+  document.addEventListener("focusin", e => { if (isTextField(e.target) || e.target.tagName === "SELECT") suspendPractice(); });
+  document.querySelector("#modeOpts").addEventListener("toggle", e => { if (e.target.open) suspendPractice(); }, true);
   $('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { setTab(b.dataset.tab); b.blur(); } });
   $('modes').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { stopDaily(); setMode(b.dataset.mode); b.blur(); } });
   $('dailyBtn').onclick = e => { e.currentTarget.blur(); startDaily(); };
@@ -1999,9 +2230,10 @@ function init() {
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   // after Cmd+Tab no keyup arrives: drop every key that looks held
-  window.addEventListener('blur', () => { shiftL = shiftR = false; releaseAll(); });
-  document.addEventListener('visibilitychange', () => { shiftL = shiftR = false; releaseAll(); if (document.hidden) saveStats(); });
-  window.addEventListener('pagehide', saveStats);
+  window.addEventListener('blur', () => { suspendPractice(); windowAway = true; shiftL = shiftR = false; releaseAll(); });
+  window.addEventListener('focus', () => { windowAway = false; renderLive(); });
+  document.addEventListener('visibilitychange', () => { shiftL = shiftR = false; releaseAll(); if (document.hidden) { suspendPractice(); saveStats(); } });
+  window.addEventListener('pagehide', () => { suspendPractice(); checkpointTime(); saveStats(); });
   buildKeyboard();
   renderStreak();
   setMode(settings.mode);
