@@ -79,6 +79,30 @@ const URL = process.env.TT_TEST_URL || 'file://' + path.resolve(__dirname, '..',
    const before=await state();await p.evaluate(()=>{const b=parseBackup(backupText());replaceData(b,readSnapshot());});await p.reload();const after=await state();
    assert.equal(after.totals.timingV2.activeMs,2000);assert.equal(after.history.length,before.history.length);assert.equal(after.history.at(-1).wpmMs,2000);
   });
+  await scenario('first-letter correction belongs to word speed; all excluded has no sample',async({p,press,state,advance})=>{
+   await p.evaluate(()=>{settings.ceiling=40;window.__tt.load('ab');});
+   await press('x');await advance(10000);await press('a');await advance(100);await press('b');
+   let h=(await state()).history.at(-1);assert.equal(h.fast,0);assert.equal(h.wpmMs,10100);assert.equal(h.acc,66.7);
+   await p.evaluate(()=>window.__tt.load('ab'));await press('a');await advance(100);await press('b');
+   h=(await state()).history.at(-1);assert.equal(h.fast,1);assert.equal(h.noSpeedSample,true);
+   assert.match(await p.locator('#result').textContent(),/–/);
+  });
+  await scenario('sleep clock discontinuity does not create practice',async({p,press,state,advance})=>{
+   await press('a');await p.clock.setSystemTime(new Date('2026-11-14T09:00:00Z'));await press('b');
+   const s=await state();assert.equal(s.active,0);assert.equal(s.wpmMs,0);assert.equal(s.breaks,1);
+  });
+  await scenario('old history is retained through practice and reload',async({p,press,state,advance})=>{
+   const old=(await state()).history[0];await press('a');await advance(1000);await press('b');await p.reload();
+   const s=await state();assert.deepEqual(s.history[0],old);assert.equal(s.history.length,2);
+  },{'tt.history':[{t:1,mode:'digits',chars:50,wpm:20,acc:95,errors:1,layoutErr:0,shiftErr:0}]});
+  await scenario('history publication failure replays once from authoritative time ledger',async({p,press,state,advance})=>{
+   await p.evaluate(()=>{window.__tt.load('ab');window.savedSet=Storage.prototype.setItem;Storage.prototype.setItem=function(k,v){if(k==='tt.history')throw new Error('history unavailable');return window.savedSet.call(this,k,v);};});
+   await press('a');await advance(2000);await press('b');
+   assert.equal((await state()).totals.timingV2.records.length,1);
+   await p.evaluate(()=>{Storage.prototype.setItem=window.savedSet;});
+   await p.reload();let s=await state();assert.equal(s.history.length,1);assert.equal(s.totals.timingV2.activeMs,2000);assert.equal(s.totals.lessons,1);
+   await p.reload();s=await state();assert.equal(s.history.length,1);assert.equal(s.totals.lessons,1);
+  });
   console.log(passed+' active-time scenarios passed');
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1});

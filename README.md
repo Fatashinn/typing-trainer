@@ -11,3 +11,7 @@
 после сбоев и безопасная ручная проверка описаны в [docs/BACKUPS.md](docs/BACKUPS.md).
 Дополнительные регрессионные тесты: `node tests/backup.test.js`.
 План развития: [docs/ROADMAP.md](docs/ROADMAP.md).
+
+Полный набор тестов: `node tests/run.js`.
+Модель времени: [docs/TIMING.md](docs/TIMING.md).
+Стабилизация и ручная проверка в Zen: [docs/STABILIZATION.md](docs/STABILIZATION.md).

@@ -1222,6 +1222,8 @@ function suspendPractice() {
   const delta = Math.max(0, performance.now() - S.anchorMono);
   S.wpmMs += delta;
   S.anchorMono = S.anchorWall = null;
+  S.skipLatency = true;
+  S.pauseStartedWall = Date.now();
   checkpointTime();
   renderLive();
 }
@@ -1232,6 +1234,10 @@ function practiceAvailable() {
 function contentTime() {
   const mono = performance.now(), wall = Date.now();
   S.previousWpmMs = S.wpmMs;
+  if (S.pauseStartedWall != null) {
+    if (wall - S.pauseStartedWall > IDLE_TIMEOUT_MS) S.longBreaks++;
+    S.pauseStartedWall = null;
+  }
   if (S.anchorMono != null) {
     const elapsed = Math.max(0, mono - S.anchorMono);
     const wallElapsed = Math.max(0, wall - S.anchorWall);
@@ -1242,7 +1248,7 @@ function contentTime() {
     if (elapsed > IDLE_TIMEOUT_MS || clockBreak) S.longBreaks++;
     if (daily && !daily.waiting) {
       const left = Math.max(0, BLOCK_MS - daily.blockMs);
-      if (active >= left) { active = left; wpm = Math.min(wpm, left); }
+      if (active >= left) active = left;
     }
     S.activeMs += active; S.wpmMs += wpm;
     if (active) allocatePractice(S.anchorWall, active);
@@ -1360,7 +1366,7 @@ function renderLive() {
   const wpm = S.pos >= 10 && speedSample() ? lessonSpeed() : '–';
   const paused = manualPause || windowAway || document.hidden || tab !== 'train';
   const idle = S.anchorMono != null && performance.now() - S.anchorMono > IDLE_TIMEOUT_MS;
-  $('live').textContent = `активно ${mmss(S.activeMs)} · ${paused ? 'пауза · ' : idle ? 'ожидание · ' : ''}${wpm} wpm · ${acc}% · ${S.pos}/${S.text.length}`;
+  $('live').textContent = `активно ${mmss(Math.floor(S.activeMs / 1000) * 1000)} · ${paused ? 'пауза · ' : idle ? 'ожидание · ' : ''}${wpm} wpm · ${acc}% · ${S.pos}/${S.text.length}`;
 }
 
 /* ---------- keyboard ---------- */
@@ -1620,7 +1626,8 @@ function advance(now, statLayout) {
   if (S.posLayout) st.le++;
   if (S.posShift) st.se++;
   const dt = now - S.lastT;
-  if (S.pos > 0 && dt > 0 && dt <= 2000) { st.t += dt; st.n++; }
+  if (!S.skipLatency && S.pos > 0 && dt > 0 && dt <= 2000) { st.t += dt; st.n++; }
+  S.skipLatency = false;
   S.lastT = now;
   S.correct++;
   S.pos++;
@@ -1937,12 +1944,12 @@ function renderStats() {
   const h = $('histTable');
   if (!history.length) h.innerHTML = '<tr><td class="muted">Пока нет уроков.</td></tr>';
   else {
-    h.innerHTML = '<tr><th>Когда</th><th>Режим</th><th>Знаков</th><th>wpm</th><th>Точность</th><th>Ошибок</th><th>Раскладка</th><th>Shift</th></tr>';
+    h.innerHTML = '<tr><th>Когда</th><th>Режим</th><th>Статус</th><th>Активно</th><th>Знаков</th><th>wpm</th><th>Точность</th><th>Ошибок</th><th>Раскладка</th><th>Shift</th></tr>';
     history.slice().reverse().forEach(x => {
       const tr = document.createElement('tr');
       const d = new Date(x.t);
       const when = `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
-      [when, MODE_NAMES[x.mode] || x.mode, x.chars, x.wpm, String(x.acc).replace('.', ',') + '%', x.errors, x.layoutErr,
+      [when, MODE_NAMES[x.mode] || x.mode, x.timingVersion === 2 ? ({completed:'завершён',interrupted:'прерван','block-ended':'конец блока'}[x.status]) : 'исторический', x.activeMs != null ? mmss(Math.floor(x.activeMs / 1000) * 1000) : '—', x.chars, x.noSpeedSample ? '—' : x.wpm, String(x.acc).replace('.', ',') + '%', x.errors, x.layoutErr,
         x.shiftErr + (x.shiftWarn ? ` (+${x.shiftWarn})` : '')].forEach(c => {
         const td = document.createElement('td'); td.textContent = c; tr.appendChild(td);
       });
@@ -2000,7 +2007,7 @@ function buildReport(lim) {
   out.push(`# Тренажёр знаков: отчёт ${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`);
   out.push(`Раскладки: Russian – PC и English (US), MacBook. Клавиши указаны по US-маркировке; Shift нужен противоположной рукой.`);
   out.push(`Уроков всего: ${totals.lessons} (~${mins(totals.ms)} мин по старому/урочному учёту; активно после обновления ${mins(totals.timingV2?.activeMs || 0)} мин); за 7 дней: ${week.length} (~${mins(week.reduce((a, x) => a + lessonMs(x), 0))} мин).`);
-  if (totals.lessons < 5) out.push(`Данных мало: меньше 5 уроков, выводы предварительные.`);
+  if (history.filter(x => !x.timingVersion || x.status === 'completed').length < 5) out.push(`Данных мало: меньше 5 завершённых уроков в доступной истории, выводы предварительные.`);
   out.push('', '## Настройки');
   out.push(`Строгий Shift: ${settings.strict ? 'вкл' : 'выкл'}. Клавиатура ${settings.iso ? 'ISO' : 'ANSI'}. ` +
     `Потолок скорости: ${+settings.ceiling ? settings.ceiling + ' wpm' : 'выкл'}. Перепечатка слова с ошибкой: ${+settings.retype ? settings.retype + ' раза' : 'выкл'}. Плотность знаков: в каждом ${settings.density}-м слове.`);
@@ -2013,11 +2020,11 @@ function buildReport(lim) {
   const today = dayKey(now);
   out.push('Минуты за 7 дней: ' + [6, 5, 4, 3, 2, 1, 0].map(k => { const dk = shiftDay(today, -k); return `${dk.slice(8)}.${dk.slice(5, 7)} ${mins(days[dk] || 0)}`; }).join(', ') + '.');
 
-  out.push('', '## Режимы: последние 10 уроков (предыдущие 10)');
+  out.push('', '## Режимы: последние 10 завершённых уроков (предыдущие 10)');
   const avg = (arr, f) => arr.reduce((a, x) => a + f(x), 0) / arr.length;
   let anyMode = false;
   Object.keys(MODE_NAMES).forEach(m => {
-    const hs = history.filter(x => x.mode === m);
+    const hs = history.filter(x => x.mode === m && (!x.timingVersion || x.status === 'completed') && !x.noSpeedSample);
     if (!hs.length) return;
     anyMode = true;
     const last = hs.slice(-10), prev = hs.slice(-20, -10);
@@ -2083,7 +2090,7 @@ function buildReport(lim) {
   if (!history.length) out.push('Пока нет.');
   history.slice(-lim.lessons).reverse().forEach(x => out.push(
     `${ddmm(x.t)} ${MODE_NAMES[x.mode] || x.mode}: ${x.wpm} wpm, ${fmt1(x.acc)}%, раскладка ${x.layoutErr}, Shift ${x.shiftErr}` +
-    (x.fast ? `, быстрых слов ${x.fast}` : '')));
+    (x.fast ? `, быстрых слов ${x.fast}` : '') + (x.timingVersion ? `, ${x.status}, активно ${Math.round(x.activeMs / 1000)} с` : ', историческая оценка')));
   return out.join('\n');
 }
 // keep the report under ~3000 chars by shortening the lists
@@ -2117,14 +2124,16 @@ function scrollCurrent(force = false) {
   if (!current) return;
   S.lastScrolledPos = S.pos;
   const r = current.getBoundingClientRect(), frame = box.getBoundingClientRect();
-  if (r.top < frame.top + 12) box.scrollTop -= frame.top + 12 - r.top;
-  else if (r.bottom > frame.bottom - 12) box.scrollTop += r.bottom - frame.bottom + 12;
+  const scale = frame.width / box.offsetWidth || 1;
+  if (r.top < frame.top + 12) box.scrollTop -= (frame.top + 12 - r.top) / scale;
+  else if (r.bottom > frame.bottom - 12) box.scrollTop += (r.bottom - frame.bottom + 12) / scale;
 }
 function fitPractice() {
   if (tab !== 'train') return;
   const stage = $('practiceStage');
-  const available = Math.floor(innerHeight - (stage.getBoundingClientRect().top + scrollY) - 16);
-  const fitted = innerWidth >= 640 && available >= 480;
+  const scale = stage.getBoundingClientRect().width / stage.offsetWidth || 1;
+  const available = Math.floor((innerHeight - (stage.getBoundingClientRect().top + scrollY) - 16) / scale);
+  const fitted = innerWidth / scale >= 640 && available >= 480;
   stage.classList.toggle('fitted', fitted);
   stage.style.setProperty('--stage-height', available + 'px');
   stage.style.setProperty('--keyboard-width', Math.max(0, (available - 220) * 14.5 / 6) + 'px');

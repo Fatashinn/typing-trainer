@@ -234,7 +234,7 @@ const st = page => page.evaluate(() => { const s = window.__tt.state; return { p
   const rep = await page.evaluate(() => window.__tt.report());
   const need = ['# Тренажёр знаков: отчёт', 'Уроков всего:', 'за 7 дней', '## Настройки', 'Строгий Shift: вкл', 'Подсказка / клавиатура:',
     '## Режимы: последние 10', '## Худшие знаки RU', '## Худшие знаки EN', '## Частые путаницы', '«д» RU → «ы»',
-    '## Ошибки раскладки', '## Ошибки Shift', 'левый вместо правого', '## Последние уроки'];
+    '## Ошибки раскладки', '## Ошибки Shift', 'левый вместо правого', '## Последние уроки', 'Данных мало'];
   const missing = need.filter(x => !rep.includes(x));
   check('отчёт содержит все разделы', missing.length === 0 && rep.length <= 3000 && !rep.trim().startsWith('{'), missing);
   console.log('--- отчёт (мало данных) ---\n' + rep + '\n---');
