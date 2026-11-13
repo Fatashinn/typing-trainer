@@ -18,7 +18,7 @@ let passed = 0;
       await page.waitForFunction(() => document.querySelector('#backupMessage').textContent.includes('проверен') || document.querySelector('#backupMessage').textContent.includes('отклонён'));
     };
     await page.click('[data-tab="settings"]');
-    await test('versioned export includes seven keys and preserves unknown supported fields', async () => {
+    await test('versioned export includes eight keys and preserves unknown supported fields', async () => {
       await page.evaluate(() => {
         settings.futureNote = 'сохранить';
         stats['RU|6'] = { a: 5, e: 1, le: 0, se: 0, t: 400, n: 1 };
@@ -27,8 +27,8 @@ let passed = 0;
         store.set('tt.daily', {lastDate:'2026-10-29',lastLang:'RU'});
       });
       const b = await backup();
-      assert.equal(b.version, 1); assert.equal(b.format, 'typing-trainer-backup');
-      assert.equal(Object.keys(b.entries).length, 7);
+      assert.equal(b.version, 2); assert.equal(b.format, 'typing-trainer-backup');
+      assert.equal(Object.keys(b.entries).length, 8);
       assert.equal(JSON.parse(b.entries['tt.settings']).futureNote, 'сохранить');
       const downloadEvent = page.waitForEvent('download'); await page.click('#backupExport');
       const download = await downloadEvent; assert.match(download.suggestedFilename(), /backup.*\.json$/);
