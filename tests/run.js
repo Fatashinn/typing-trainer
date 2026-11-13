@@ -1,7 +1,7 @@
 // Node + Playwright are test-only dependencies. No application build is required.
 const {spawnSync}=require('node:child_process');
 const path=require('node:path');
-const suites=['trainer','backup','active-time','custom-text','symbols','layout'];
+const suites=['trainer','backup','active-time','custom-text','symbols','layout','layout-registry','layout-sources','learning','i18n','platform-backup','platform'];
 let failed=0;
 for(const suite of suites){
  console.log('\nRunning '+suite+'.test.js');
