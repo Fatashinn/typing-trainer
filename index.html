@@ -1058,20 +1058,24 @@ function normalizeText(s) {
     .split('').filter(typeable).join('')
     .replace(/ {2,}/g, ' ').trim();
 }
+let customChunk = null;
 function genCustom() {
+  customChunk = null;
   const c = store.get(K_CUSTOM, { text: '', offset: 0 });
   const t = normalizeText(c.text || '');
   if (!t) return '';
   let off = c.offset || 0;
   if (off >= t.length) off = 0;
+  while (t[off] === ' ') off++;
   let end = Math.min(t.length, off + MAX_LEN);
   if (end < t.length) {
     const sp = t.lastIndexOf(' ', end);
     if (sp > off + MIN_LEN / 2) end = sp;
   }
-  const chunk = t.slice(off, end).trim();
-  c.offset = end >= t.length ? 0 : end + 1;
-  store.set(K_CUSTOM, c);
+  const chunk = t.slice(off, end).trimEnd();
+  let next = end;
+  while (t[next] === ' ') next++;
+  customChunk = { start: off, next: next >= t.length ? 0 : next, length: chunk.length, source: c.text };
   return chunk;
 }
 
@@ -1152,6 +1156,7 @@ function lessonSpeed() {
   return speedSample() ? Math.round((S.pos - S.fastChars) / 5 / ((S.wpmMs - S.fastMs) / 60000)) : 0;
 }
 function checkpointTime() {
+  saveCustomProgress();
   if (!S || !S.keys || S.recorded) return;
   timingLedger().pending = timeSnapshot();
   // One authoritative key contains both the checkpoint and its already credited time.
@@ -1228,14 +1233,23 @@ function pauseButton() {
   renderLive();
 }
 
+function saveCustomProgress() {
+  if (!S?.custom || !S.keys) return;
+  const c = store.get(K_CUSTOM, { text: '', offset: 0 });
+  if (c.text !== S.custom.source) return;
+  const originalCount = S.pos - [...S.sourceInserted].filter(i => i < S.pos).length;
+  const offset = originalCount >= S.custom.length ? S.custom.next : S.custom.start + originalCount;
+  if (c.offset !== offset) store.set(K_CUSTOM, { ...c, offset });
+}
 function startLesson(text) {
   if (S && !S.done && !S.recorded && S.keys) recordLesson("interrupted");
   manualPause = false;
   $("pauseBtn").textContent = "Пауза";
   $("pauseBtn").setAttribute("aria-pressed", "false");
-  text = text == null ? generate(settings.mode) : text;
+  const generated = text == null;
+  text = generated ? generate(settings.mode) : text;
   S = {
-    mode: settings.mode, text, layouts: assignLayouts(text, fallbackLayout(settings.mode)),
+    mode: settings.mode, text, custom: generated && settings.mode === "custom" ? customChunk : null, sourceInserted: new Set(), layouts: assignLayouts(text, fallbackLayout(settings.mode)),
     pos: 0, startT: 0, lastT: 0, done: false,
     id: crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random(),
     activeMs: 0, wpmMs: 0, longBreaks: 0, anchorMono: null, anchorWall: null, recorded: false, wStartMs: 0,
@@ -1608,6 +1622,8 @@ function wordDone(now) {
     for (let k = 0; k < n; k++) { ins += ' ' + word; insL = insL.concat(lays); }
     const shift = set => new Set([...set].map(i => i >= end ? i + ins.length : i));
     S.errAt = shift(S.errAt); S.fast = shift(S.fast); S.rep = shift(S.rep);
+    S.sourceInserted = shift(S.sourceInserted);
+    for (let k = 0; k < ins.length; k++) S.sourceInserted.add(end + k);
     S.text = S.text.slice(0, end) + ins + S.text.slice(end);
     S.layouts.splice(end, 0, ...insL);
     for (let k = 0; k < ins.length; k++) if (ins[k] !== ' ') S.rep.add(end + k);
@@ -1631,6 +1647,7 @@ function countSyms(text) {
 
 // store the lesson (also a partly typed one when a daily block runs out of time)
 function recordLesson(status = 'completed') {
+  saveCustomProgress();
   if (S.recorded) return { wpm: lessonSpeed(), acc: S.keys ? Math.round(1000 * S.correct / S.keys) / 10 : 100 };
   const record = timeSnapshot(status);
   S.recorded = true; S.anchorMono = S.anchorWall = null;
