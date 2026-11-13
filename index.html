@@ -264,6 +264,7 @@ h2:first-child { margin-top: 0; }
       </div>
       <div class="row" style="gap:8px">
       <button id="newBtn" title="Esc">Новый текст</button>
+      <button id="pauseBtn" aria-pressed="false">Пауза</button>
       <label class="quick">Подсказка
         <select id="hintSel" data-quick="1">
           <option value="full">полная</option>
@@ -398,14 +399,28 @@ function validateRecord(key, v) {
     v.forEach(h => {
       requireData(object(h) && mode(h.mode), 'Неверный урок');
       nums(h, ['t','chars','wpm','acc','errors','layoutErr','shiftErr']);
-      optionalNums(h, ['ms','shiftWarn','fast']);
+      optionalNums(h, ['ms','shiftWarn','fast','activeMs','wpmMs','longBreaks']);
+      if ('timingVersion' in h) {
+        requireData(h.timingVersion === 2 && typeof h.id === 'string' && ['completed','interrupted','block-ended'].includes(h.status), 'Неверная версия времени урока');
+        nums(h, ['activeMs','wpmMs','longBreaks']);
+        requireData(h.activeMs <= h.wpmMs && typeof h.noSpeedSample === 'boolean', 'Неверные временные показатели');
+      }
       requireData(h.acc <= 100 && h.t <= 8640000000000000, 'Неверные показатели урока');
       if ('cnt' in h) { requireData(object(h.cnt), 'Неверные счётчики'); Object.values(h.cnt).forEach(n => requireData(number(n), 'Неверный счётчик')); }
     });
   } else if (key === 'tt.custom') {
     obj(); requireData(typeof v.text === 'string' && v.text.length <= 1000000, 'Слишком большой или неверный текст');
     if ('offset' in v) requireData(Number.isSafeInteger(v.offset) && v.offset >= 0 && v.offset <= v.text.length, 'Неверная позиция текста');
-  } else if (key === 'tt.totals') { obj(); nums(v, ['lessons','ms']); }
+  } else if (key === 'tt.totals') {
+    obj(); nums(v, ['lessons','ms']);
+    if ('timingV2' in v) {
+      const l = v.timingV2;
+      requireData(object(l) && l.version === 1 && number(l.activeMs), 'Неверный журнал активного времени');
+      validateRecord('tt.days', l.legacyDays); validateRecord('tt.days', l.activeDays);
+      if ('pending' in l) validateRecord('tt.history', [l.pending]);
+      if ('records' in l) validateRecord('tt.history', l.records);
+    }
+  }
   else if (key === 'tt.days') {
     obj(); Object.entries(v).forEach(([k,n]) => requireData(/^\d{4}-\d{2}-\d{2}$/.test(k) && number(n), 'Неверный день'));
   } else if (key === 'tt.daily') {
@@ -1095,11 +1110,135 @@ function armReveal() {
   }, REVEAL_MS);
 }
 
+/* ---------- event-based practice time ---------- */
+const IDLE_TIMEOUT_MS = 5000;
+let manualPause = false;
+let windowAway = false;
+function timingLedger() {
+  if (!totals.timingV2) totals.timingV2 = { version: 1, legacyDays: { ...days }, activeDays: {}, activeMs: 0 };
+  return totals.timingV2;
+}
+function publishDays() {
+  const ledger = timingLedger();
+  days = { ...ledger.legacyDays };
+  for (const [day, ms] of Object.entries(ledger.activeDays)) days[day] = (days[day] || 0) + ms;
+}
+function allocatePractice(start, duration) {
+  const ledger = timingLedger();
+  let cursor = start, left = duration;
+  while (left > 0) {
+    const d = new Date(cursor);
+    const midnight = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
+    const take = Math.min(left, midnight - cursor);
+    const key = dayKey(cursor);
+    ledger.activeDays[key] = (ledger.activeDays[key] || 0) + take;
+    cursor += take; left -= take;
+  }
+  ledger.activeMs += duration;
+  publishDays();
+}
+function timeSnapshot(status = 'interrupted') {
+  return {
+    id: S.id, timingVersion: 2, status, t: Date.now(), mode: S.mode,
+    chars: S.pos, keys: S.keys, wpm: lessonSpeed(), acc: S.keys ? Math.round(1000 * S.correct / S.keys) / 10 : 100,
+    ms: Math.round(S.wpmMs), wpmMs: Math.round(S.wpmMs), activeMs: Math.round(S.activeMs),
+    longBreaks: S.longBreaks, errors: S.errors, layoutErr: S.layoutErr,
+    shiftErr: S.shiftErr, shiftWarn: S.shiftWarn, fast: S.fastWords,
+    noSpeedSample: !speedSample(), cnt: countSyms(S.text.slice(0, S.pos))
+  };
+}
+function speedSample() { return S.pos - S.fastChars > 0 && S.wpmMs - S.fastMs > 0; }
+function lessonSpeed() {
+  return speedSample() ? Math.round((S.pos - S.fastChars) / 5 / ((S.wpmMs - S.fastMs) / 60000)) : 0;
+}
+function checkpointTime() {
+  if (!S || !S.keys || S.recorded) return;
+  timingLedger().pending = timeSnapshot();
+  // One authoritative key contains both the checkpoint and its already credited time.
+  store.set(K_TOTALS, totals);
+}
+function appendTimedRecord(record) {
+  if (!history.some(h => h.id === record.id)) history.push(record);
+  if (history.length > 50) history = history.slice(-50);
+}
+function recoverPractice() {
+  if (!totals.timingV2) return;
+  const ledger = timingLedger();
+  publishDays();
+  if (ledger.pending) {
+    const record = { ...ledger.pending, status: 'interrupted' };
+    ledger.records = [...(ledger.records || []), record].slice(-50);
+    delete ledger.pending;
+    totals.lessons++;
+    totals.ms += record.ms;
+  }
+  if (ledger.records?.length) {
+    // Persist the decision before publishing history; replay by id is idempotent.
+    if (!store.set(K_TOTALS, totals)) return;
+    ledger.records.forEach(appendTimedRecord);
+    if (store.set(K_HIST, history)) {
+      delete ledger.records;
+      store.set(K_TOTALS, totals);
+    }
+  }
+  store.set(K_DAYS, days);
+}
+function suspendPractice() {
+  if (!S || S.done || S.anchorMono == null) return;
+  const delta = Math.max(0, performance.now() - S.anchorMono);
+  S.wpmMs += delta;
+  S.anchorMono = S.anchorWall = null;
+  checkpointTime();
+  renderLive();
+}
+function practiceAvailable() {
+  return !manualPause && !windowAway && !document.hidden && tab === 'train' && !isTextField(document.activeElement)
+    && !document.activeElement?.closest('#modeOpts details[open]');
+}
+function contentTime() {
+  const mono = performance.now(), wall = Date.now();
+  S.previousWpmMs = S.wpmMs;
+  if (S.anchorMono != null) {
+    const elapsed = Math.max(0, mono - S.anchorMono);
+    const wallElapsed = Math.max(0, wall - S.anchorWall);
+    // A stopped monotonic clock (sleep on some platforms) is an explicit break.
+    const clockBreak = Math.abs(wallElapsed - elapsed) > 2000;
+    let active = clockBreak ? 0 : Math.min(IDLE_TIMEOUT_MS, elapsed);
+    let wpm = clockBreak ? 0 : elapsed;
+    if (elapsed > IDLE_TIMEOUT_MS || clockBreak) S.longBreaks++;
+    if (daily && !daily.waiting) {
+      const left = Math.max(0, BLOCK_MS - daily.blockMs);
+      if (active >= left) { active = left; wpm = Math.min(wpm, left); }
+    }
+    S.activeMs += active; S.wpmMs += wpm;
+    if (active) allocatePractice(S.anchorWall, active);
+    if (daily && !daily.waiting) daily.blockMs += active;
+  }
+  S.anchorMono = mono; S.anchorWall = wall;
+  if (daily && !daily.waiting && daily.blockMs >= BLOCK_MS) {
+    checkpointTime(); endBlock(); return false;
+  }
+  return true;
+}
+function pauseButton() {
+  if (!manualPause) suspendPractice();
+  manualPause = !manualPause;
+  $('pauseBtn').textContent = manualPause ? 'Продолжить' : 'Пауза';
+  $('pauseBtn').setAttribute('aria-pressed', String(manualPause));
+  renderLive();
+}
+
 function startLesson(text) {
+  if (S && !S.done && !S.recorded && S.keys) recordLesson("interrupted");
+  manualPause = false;
+  $("pauseBtn").textContent = "Пауза";
+  $("pauseBtn").setAttribute("aria-pressed", "false");
   text = text == null ? generate(settings.mode) : text;
   S = {
     mode: settings.mode, text, layouts: assignLayouts(text, fallbackLayout(settings.mode)),
     pos: 0, startT: 0, lastT: 0, done: false,
+    id: crypto.randomUUID ? crypto.randomUUID() : Date.now() + "-" + Math.random(),
+    activeMs: 0, wpmMs: 0, longBreaks: 0, anchorMono: null, anchorWall: null, recorded: false, wStartMs: 0,
     keys: 0, correct: 0, errors: 0, layoutErr: 0, shiftErr: 0, shiftWarn: 0,
     posErr: false, posLayout: false, posShift: false, errAt: new Set(), sinceSave: 0,
     // words: start of the current word, its error flag; repeats and too-fast words by char index
@@ -1173,9 +1312,10 @@ function update() {
 
 function renderLive() {
   const acc = S.keys ? Math.round(100 * S.correct / S.keys) : 100;
-  const el = S.startT && S.lastT > S.startT ? (S.lastT - S.startT) / 60000 : 0;
-  const wpm = el && S.pos >= 10 ? Math.round(S.pos / 5 / el) : '–';
-  $('live').textContent = `раскладка: ${settings.lastLayout} · ${wpm} wpm · ${acc}% · ${S.pos}/${S.text.length}`;
+  const wpm = S.pos >= 10 && speedSample() ? lessonSpeed() : '–';
+  const paused = manualPause || windowAway || document.hidden || tab !== 'train';
+  const idle = S.anchorMono != null && performance.now() - S.anchorMono > IDLE_TIMEOUT_MS;
+  $('live').textContent = `активно ${mmss(S.activeMs)} · ${paused ? 'пауза · ' : idle ? 'ожидание · ' : ''}${wpm} wpm · ${acc}% · ${S.pos}/${S.text.length}`;
 }
 
 /* ---------- keyboard ---------- */
@@ -1331,7 +1471,12 @@ function onKeyDown(e) {
   if (e.key.length !== 1 && e.key !== 'Dead') return;
   e.preventDefault();
   if (e.repeat || !S.text || S.pos >= S.text.length) return;
+  if (!practiceAvailable()) return;
+  if (!contentTime()) return;
   handleChar(e);
+  checkpointTime();
+  renderDailyBar();
+  renderStreak();
 }
 function onKeyUp(e) {
   trackKeyUp(e);
@@ -1423,7 +1568,7 @@ function miss(text, kind) {
 
 function advance(now, statLayout) {
   const ch = S.text[S.pos];
-  if (ch !== ' ' && (S.pos === 0 || S.text[S.pos - 1] === ' ')) { S.wStartPos = S.pos; S.wStartT = S.pos === 0 ? now : S.lastT; }
+  if (ch !== ' ' && (S.pos === 0 || S.text[S.pos - 1] === ' ')) S.wStartPos = S.pos;
   const st = statOf(statLayout, ch);
   st.a++;
   if (S.posErr) st.e++;
@@ -1435,9 +1580,9 @@ function advance(now, statLayout) {
   S.correct++;
   S.pos++;
   S.posErr = S.posLayout = S.posShift = false;
-  if (ch === ' ') S.wordErr = false;
+  if (ch === ' ') { S.wordErr = false; S.wStartMs = S.previousWpmMs || 0; }
   else if (S.pos >= S.text.length || S.text[S.pos] === ' ') wordDone(now);
-  if (++S.sinceSave >= 25) { S.sinceSave = 0; saveStats(); }
+  if (++S.sinceSave >= 25) { S.sinceSave = 0; store.set(K_STATS, stats); }
   if (S.pos >= S.text.length) return finish();
   armReveal();
   update();
@@ -1447,8 +1592,8 @@ function advance(now, statLayout) {
 function wordDone(now) {
   const start = S.wStartPos, end = S.pos;
   let changed = false;
-  const chars = start === 0 ? end - start - 1 : end - start;
-  const dur = now - S.wStartT;
+  const chars = end - start + (start > 0 ? 1 : 0);
+  const dur = S.wpmMs - S.wStartMs;
   const ceil = +settings.ceiling || 0;
   if (ceil && chars > 0 && dur > 0 && chars / 5 / (dur / 60000) > ceil) {
     for (let i = start; i < end; i++) S.fast.add(i);
@@ -1485,25 +1630,19 @@ function countSyms(text) {
 }
 
 // store the lesson (also a partly typed one when a daily block runs out of time)
-function recordLesson() {
-  const ms = Math.max(0, Math.round(S.lastT - S.startT));
-  const effChars = S.pos - S.fastChars, effMs = ms - S.fastMs;
-  const wpm = effChars > 0 && effMs > 0 ? Math.round(effChars / 5 / (effMs / 60000)) : 0;
-  const acc = S.keys ? Math.round(1000 * S.correct / S.keys) / 10 : 100;
-  history.push({
-    t: Date.now(), mode: S.mode, chars: S.pos, wpm, acc, ms,
-    errors: S.errors, layoutErr: S.layoutErr, shiftErr: S.shiftErr, shiftWarn: S.shiftWarn,
-    fast: S.fastWords, cnt: countSyms(S.text.slice(0, S.pos))
-  });
-  if (history.length > 50) history = history.slice(-50);
-  totals.lessons++;
-  totals.ms += ms;
-  const dk = dayKey(Date.now());
-  days[dk] = (days[dk] || 0) + ms;
-  if (daily && !daily.waiting) daily.blockMs += ms;
-  saveStats();
+function recordLesson(status = 'completed') {
+  if (S.recorded) return { wpm: lessonSpeed(), acc: S.keys ? Math.round(1000 * S.correct / S.keys) / 10 : 100 };
+  const record = timeSnapshot(status);
+  S.recorded = true; S.anchorMono = S.anchorWall = null;
+  const ledger = timingLedger();
+  delete ledger.pending; ledger.records = [...(ledger.records || []), record].slice(-50);
+  totals.lessons++; totals.ms += record.ms;
+  const saved = store.set(K_TOTALS, totals);
+  appendTimedRecord(record);
+  store.set(K_STATS, stats); store.set(K_DAYS, days);
+  if (saved && store.set(K_HIST, history)) { delete ledger.records; store.set(K_TOTALS, totals); }
   renderStreak();
-  return { wpm, acc };
+  return { wpm: record.noSpeedSample ? '–' : record.wpm, acc: record.acc };
 }
 
 function finish() {
@@ -1552,22 +1691,22 @@ function shiftDay(key, delta) {
 }
 function streakInfo() {
   const today = dayKey(Date.now()), yest = shiftDay(today, -1);
-  const ok = k => (days[k] || 0) >= DAY_GOAL_MS;
+  const ledger = totals.timingV2;
+  const ok = k => ledger ? (ledger.legacyDays[k] || 0) >= DAY_GOAL_MS || (ledger.activeDays[k] || 0) >= DAY_GOAL_MS : (days[k] || 0) >= DAY_GOAL_MS;
   let n = 0, k = ok(today) ? today : yest;
   while (ok(k)) { n++; k = shiftDay(k, -1); }
   const earlier = Object.keys(days).some(x => x < yest && days[x] > 0);
-  return { streak: n, todayMs: days[today] || 0, yestMs: days[yest] || 0, missedYesterday: !ok(yest) && earlier };
+  return { streak: n, todayMs: ledger ? ledger.activeDays[today] || 0 : 0, yestMs: ledger ? ledger.activeDays[yest] || 0 : 0, legacyTodayMs: ledger ? ledger.legacyDays[today] || 0 : days[today] || 0, missedYesterday: !ok(yest) && earlier };
 }
 function renderStreak() {
   const si = streakInfo();
   $('streak').innerHTML = `Дней подряд: <b>${si.streak}</b> · сегодня ${Math.floor(si.todayMs / 60000)} из 10 мин` +
+    (si.legacyTodayMs ? ' · есть историческая оценка времени' : '') +
     (si.missedYesterday ? ' · <span class="miss">вчера пропущено</span>' : '');
 }
 function dailyElapsed() {
   if (!daily) return 0;
-  let cur = 0;
-  if (!daily.waiting && S && S.startT && !S.done) cur = Math.max(0, Math.min(performance.now(), S.lastT + 5000) - S.startT);
-  return daily.blockMs + cur;
+  return daily.blockMs;
 }
 const mmss = ms => { const t = Math.max(0, Math.ceil(ms / 1000)); return `${pad2(Math.floor(t / 60))}:${pad2(t % 60)}`; };
 function renderDailyBar() {
@@ -1577,18 +1716,19 @@ function renderDailyBar() {
   const el = Math.min(BLOCK_MS, dailyElapsed()), b = daily.blocks[Math.min(daily.idx, daily.blocks.length - 1)];
   const total = Math.min(100, Math.round(100 * (Math.min(daily.idx, daily.blocks.length) * BLOCK_MS + (daily.waiting ? 0 : el)) / (daily.blocks.length * BLOCK_MS)));
   bar.innerHTML = `<div class="row"><span><b>Тренировка дня</b> · блок ${Math.min(daily.idx + 1, daily.blocks.length)} из ${daily.blocks.length}: ${b.label}</span>
-    <span>осталось <span class="t">${daily.waiting ? mmss(BLOCK_MS) : mmss(BLOCK_MS - el)}</span></span>
+    <span>осталось активно <span class="t">${daily.waiting ? mmss(BLOCK_MS) : mmss(BLOCK_MS - el)}</span></span>
     <span class="muted">всего ${total}%</span><button id="dailyStop" style="margin-left:auto">Прервать</button></div>
     <div class="bar"><div style="width:${total}%"></div></div>`;
   $('dailyStop').onclick = e => { e.currentTarget.blur(); stopDaily(); startLesson(); };
 }
 function dailyTick() {
   if (!daily) return;
-  if (!daily.waiting && dailyElapsed() >= BLOCK_MS) endBlock();
+  renderLive();
   renderDailyBar();
 }
 function startDaily() {
   stopDaily();
+  if (S && !S.done && S.keys) recordLesson("interrupted");
   const today = dayKey(Date.now());
   const d = store.get(K_DAILY, {});
   const lang = d.lastDate === today ? d.lastLang : (d.lastLang === 'RU' ? 'EN' : 'RU');
@@ -1601,7 +1741,7 @@ function startDaily() {
   daily.timer = setInterval(dailyTick, 250);
   renderDailyBar();
   showScreen(`<div class="big" style="font-size:24px">Тренировка дня</div>
-    <p>${daily.blocks.map(b => b.label).join(' → ')}, по 5 минут.<br><span class="muted small">Время идёт, только пока печатаешь.</span></p>`, startBlock);
+    <p>${daily.blocks.map(b => b.label).join(' → ')}, по 5 минут.<br><span class="muted small">Считаются интервалы между нажатиями, до 5 секунд. Пауза и ожидание между блоками не учитываются.</span></p>`, startBlock);
 }
 function startBlock() {
   daily.waiting = false;
@@ -1610,7 +1750,7 @@ function startBlock() {
   renderDailyBar();
 }
 function endBlock() {
-  if (S && !S.done && S.startT && S.pos > 0) { S.done = true; recordLesson(); }
+  if (S && !S.done && S.keys) { S.done = true; recordLesson("block-ended"); }
   daily.waiting = true;
   daily.idx++;
   if (daily.idx < daily.blocks.length) {
@@ -1629,6 +1769,7 @@ function endBlock() {
 }
 function stopDaily() {
   if (!daily) return;
+  if (S && !S.done && S.keys) { recordLesson("interrupted"); S.done = true; }
   clearInterval(daily.timer);
   daily = null;
   renderDailyBar();
@@ -1810,7 +1951,7 @@ function buildReport(lim) {
   const mins = ms => Math.round(ms / 60000);
   out.push(`# Тренажёр знаков: отчёт ${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`);
   out.push(`Раскладки: Russian – PC и English (US), MacBook. Клавиши указаны по US-маркировке; Shift нужен противоположной рукой.`);
-  out.push(`Уроков всего: ${totals.lessons} (~${mins(totals.ms)} мин); за 7 дней: ${week.length} (~${mins(week.reduce((a, x) => a + lessonMs(x), 0))} мин).`);
+  out.push(`Уроков всего: ${totals.lessons} (~${mins(totals.ms)} мин по старому/урочному учёту; активно после обновления ${mins(totals.timingV2?.activeMs || 0)} мин); за 7 дней: ${week.length} (~${mins(week.reduce((a, x) => a + lessonMs(x), 0))} мин).`);
   if (totals.lessons < 5) out.push(`Данных мало: меньше 5 уроков, выводы предварительные.`);
   out.push('', '## Настройки');
   out.push(`Строгий Shift: ${settings.strict ? 'вкл' : 'выкл'}. Клавиатура ${settings.iso ? 'ISO' : 'ANSI'}. ` +
@@ -1963,6 +2104,7 @@ function initBackup() {
 
 /* ---------- tabs & init ---------- */
 function setTab(t) {
+  if (t !== tab) suspendPractice();
   tab = t;
   for (const b of $('tabs').children) b.setAttribute('aria-pressed', String(b.dataset.tab === t));
   ['train', 'stats', 'settings'].forEach(x => $('tab-' + x).classList.toggle('hidden', x !== t));
@@ -1971,7 +2113,11 @@ function setTab(t) {
 
 function init() {
   for (const k of USER_KEYS) store.get(k, null);
+  recoverPractice();
   initBackup();
+  $("pauseBtn").onclick = e => { e.currentTarget.blur(); pauseButton(); };
+  document.addEventListener("focusin", e => { if (isTextField(e.target) || e.target.tagName === "SELECT") suspendPractice(); });
+  document.querySelector("#modeOpts").addEventListener("toggle", e => { if (e.target.open) suspendPractice(); }, true);
   $('tabs').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { setTab(b.dataset.tab); b.blur(); } });
   $('modes').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { stopDaily(); setMode(b.dataset.mode); b.blur(); } });
   $('dailyBtn').onclick = e => { e.currentTarget.blur(); startDaily(); };
@@ -1999,9 +2145,10 @@ function init() {
   window.addEventListener('keydown', onKeyDown);
   window.addEventListener('keyup', onKeyUp);
   // after Cmd+Tab no keyup arrives: drop every key that looks held
-  window.addEventListener('blur', () => { shiftL = shiftR = false; releaseAll(); });
-  document.addEventListener('visibilitychange', () => { shiftL = shiftR = false; releaseAll(); if (document.hidden) saveStats(); });
-  window.addEventListener('pagehide', saveStats);
+  window.addEventListener('blur', () => { suspendPractice(); windowAway = true; shiftL = shiftR = false; releaseAll(); });
+  window.addEventListener('focus', () => { windowAway = false; renderLive(); });
+  document.addEventListener('visibilitychange', () => { shiftL = shiftR = false; releaseAll(); if (document.hidden) { suspendPractice(); saveStats(); } });
+  window.addEventListener('pagehide', () => { suspendPractice(); checkpointTime(); saveStats(); });
   buildKeyboard();
   renderStreak();
   setMode(settings.mode);
